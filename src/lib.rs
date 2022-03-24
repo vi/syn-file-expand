@@ -1,5 +1,5 @@
+use proc_macro2::{TokenStream, TokenTree};
 use std::path::PathBuf;
-use proc_macro2::{TokenTree, TokenStream};
 use thiserror::Error;
 
 pub extern crate proc_macro2;
@@ -117,9 +117,7 @@ fn expand_impl<R: Resolver>(
                     (None, None) => panic!("A module without both `{{}}` and `;`?"),
                     (Some(_), Some(_)) => panic!("A module with both `{{}}` and `;`?"),
                     (Some(_), None) => continue, // inline module
-                    (None, Some(semi)) => {
-                        (item_mod, semi)
-                    }
+                    (None, Some(semi)) => (item_mod, semi),
                 }
             }
             _ => continue,
@@ -136,9 +134,7 @@ fn expand_impl<R: Resolver>(
         let mut dirs = dirs.clone();
 
         let len_hint = dirs.len()
-            + std::convert::identity::<usize>(
-                dirs.iter().map(|x| x.as_os_str().len()).sum(),
-            )
+            + std::convert::identity::<usize>(dirs.iter().map(|x| x.as_os_str().len()).sum())
             + 8
             + chunk.as_os_str().len();
 
@@ -155,70 +151,36 @@ fn expand_impl<R: Resolver>(
 
         let mod_syn_path = syn::Path {
             leading_colon: None,
-            segments: syn::punctuated::Punctuated::from_iter(
-                inner_stack.iter().map(|x| syn::PathSegment {
+            segments: syn::punctuated::Punctuated::from_iter(inner_stack.iter().map(|x| {
+                syn::PathSegment {
                     ident: x.clone(),
                     arguments: syn::PathArguments::None,
-                }),
-            ),
+                }
+            })),
         };
 
         let mut attrs = Vec::with_capacity(item_mod.attrs.len());
 
-        let mut inner : Option<Option<syn::File>> = None;
+        let mut inner: Option<Option<syn::File>> = None;
 
         let mut dirs_candidate = Vector::new();
 
-        let mut path_attrs : Vec<(Vec<TokenTree>, Option<TokenStream>)> = Vec::new();
-        extract_path_and_cfg_path_attrs(&item_mod.attrs, &mut path_attrs, &mod_syn_path, &mut attrs)?;
+        let mut path_attrs: Vec<(Vec<TokenTree>, Option<TokenStream>)> = Vec::new();
+        attrs::extract_path_and_cfg_path_attrs(
+            &item_mod.attrs,
+            &mut path_attrs,
+            &mod_syn_path,
+            &mut attrs,
+        )?;
 
         for (tt, cfg) in path_attrs {
             if cfg.is_none() && inner.is_some() {
-                return Err(
-                    Error::MultipleExplicitPathsSpecifiedForOneModule {
-                        module: mod_syn_path,
-                    },
-                );
-            }
-
-            if tt.len() != 2 {
-                return Err(Error::PathAttrParseError {
+                return Err(Error::MultipleExplicitPathsSpecifiedForOneModule {
                     module: mod_syn_path,
-                    e: PathAttrParseError::NotExactlyTwoTokens,
                 });
             }
 
-            match &tt[0] {
-                TokenTree::Punct(x) if x.as_char() == '=' => {
-                    ()
-                }
-                _ => {
-                    return Err(Error::PathAttrParseError {
-                        module: mod_syn_path,
-                        e: PathAttrParseError::FirstTokenIsNotEqualSign,
-                    })
-                }
-            }
-            match &tt[1] {
-                TokenTree::Literal(_) => (),
-                _ => return Err(Error::PathAttrParseError {
-                    module: mod_syn_path,
-                    e: PathAttrParseError::SecondTokenIsNotStringLiteral,
-                }),
-            }
-            let ts = TokenStream::from(tt[1].clone());
-            let tslit: syn::Lit =
-                syn::parse2(ts).map_err(|e| Error::SynParseError {
-                    module: mod_syn_path.clone(),
-                    e,
-                })?;
-            let explicit_path = match tslit {
-                syn::Lit::Str(x) => PathBuf::from(x.value()),
-                _ => return Err(Error::PathAttrParseError {
-                    module: mod_syn_path,
-                    e: PathAttrParseError::SecondTokenIsNotStringLiteral,
-                }),
-            };
+            let explicit_path = attrs::extract_path_from_attr(tt, &mod_syn_path)?;
 
             let mut module_file_explicit = PathBuf::with_capacity(len_hint);
 
@@ -234,27 +196,22 @@ fn expand_impl<R: Resolver>(
             dirs_candidate.push_back(PathBuf::from(chunk.clone()));
 
             if let Some(cfg) = cfg {
-                let cfg: syn::Meta = syn::parse2(cfg).map_err(|e|Error::SynParseError{module:mod_syn_path.clone(),e})?;
-                if let Some(x) = resolver.resolve(
-                    mod_syn_path.clone(),
-                    module_file_explicit,
-                    Some(cfg),
-                )? {
+                let cfg: syn::Meta = syn::parse2(cfg).map_err(|e| Error::SynParseError {
+                    module: mod_syn_path.clone(),
+                    e,
+                })?;
+                if let Some(x) =
+                    resolver.resolve(mod_syn_path.clone(), module_file_explicit, Some(cfg))?
+                {
                     if inner.is_some() {
-                        return Err(
-                            Error::MultipleExplicitPathsSpecifiedForOneModule {
-                                module: mod_syn_path,
-                            },
-                        );
+                        return Err(Error::MultipleExplicitPathsSpecifiedForOneModule {
+                            module: mod_syn_path,
+                        });
                     }
                     inner = Some(Some(x));
                 }
             } else {
-                inner = Some(resolver.resolve(
-                    mod_syn_path.clone(),
-                    module_file_explicit,
-                    None,
-                )?);
+                inner = Some(resolver.resolve(mod_syn_path.clone(), module_file_explicit, None)?);
             }
         }
 
@@ -263,18 +220,13 @@ fn expand_impl<R: Resolver>(
             i
         } else {
             dirs.push_back(PathBuf::from(chunk));
-            let inner_nomod =
-                resolver.resolve(mod_syn_path.clone(), module_file_nomod, None);
+            let inner_nomod = resolver.resolve(mod_syn_path.clone(), module_file_nomod, None);
             match inner_nomod {
                 Ok(_) => (),
                 Err(Error::FailedToOpenFile { .. }) => (),
                 Err(e) => return Err(e),
             }
-            let inner_mod = resolver.resolve(
-                mod_syn_path.clone(),
-                module_file_mod.clone(),
-                None,
-            );
+            let inner_mod = resolver.resolve(mod_syn_path.clone(), module_file_mod.clone(), None);
             match inner_mod {
                 Ok(_) => (),
                 Err(Error::FailedToOpenFile { .. }) => (),
@@ -288,9 +240,7 @@ fn expand_impl<R: Resolver>(
                 }
                 (Ok(None), Ok(None)) => None,
                 (Ok(Some(x)), _) => Some(x),
-                (_, Ok(Some(x))) => {
-                    Some(x)
-                }
+                (_, Ok(Some(x))) => Some(x),
                 (Err(e), _) => return Err(e),
                 (_, Err(e)) => return Err(e),
             }
@@ -310,7 +260,10 @@ fn expand_impl<R: Resolver>(
                 vis: item_mod.vis.clone(),
                 mod_token: item_mod.mod_token,
                 ident: id,
-                content: Some((syn::token::Brace(semicolon_after_module_declaration.span), items)),
+                content: Some((
+                    syn::token::Brace(semicolon_after_module_declaration.span),
+                    items,
+                )),
                 semi: None,
             };
             *item = syn::Item::Mod(new_mod);
@@ -319,101 +272,4 @@ fn expand_impl<R: Resolver>(
     Ok(())
 }
 
-fn extract_path_and_cfg_path_attrs(input_attrs: &[syn::Attribute], path_attrs: &mut Vec<(Vec<TokenTree>, Option<TokenStream>)>, module_name: &syn::Path, attrs: &mut Vec<syn::Attribute>) -> Result<(), Error> {
-    for attr in input_attrs {
-        match &attr.path {
-            x if x.get_ident().map(|x| x.to_string())
-                == Some("path".to_owned()) =>
-            {
-                let tt = Vec::<TokenTree>::from_iter(
-                    attr.tokens.clone(),
-                );
-                path_attrs.push((tt, None));
-            }
-            x if x.get_ident().map(|x| x.to_string())
-                == Some("cfg_attr".to_owned()) =>
-            {
-                let tt = Vec::<TokenTree>::from_iter(
-                    attr.tokens.clone(),
-                );
-                if tt.len() != 1 {
-                    return Err(Error::PathAttrParseError {
-                        module: module_name.clone(),
-                        e: PathAttrParseError::CfgAttrNotRoundGroup,
-                    });
-                }
-                let t = tt.into_iter().next().unwrap();
-                let g = match t {
-                    TokenTree::Group(g)
-                        if g.delimiter()
-                            == proc_macro2::Delimiter::Parenthesis =>
-                    {
-                        g
-                    }
-                    _ => {
-                        return Err(Error::PathAttrParseError {
-                            module: module_name.clone(),
-                            e: PathAttrParseError::CfgAttrNotRoundGroup,
-                        })
-                    }
-                };
-                let inner =
-                    Vec::<TokenTree>::from_iter(g.stream());
-                if inner.len() < 3 {
-                    return Err(Error::PathAttrParseError {
-                        module: module_name.clone(),
-                        e: PathAttrParseError::CfgAttrNotTwoParams,
-                    });
-                }
-                let mut ts_before_comma = TokenStream::new();
-                let mut ts_after_comma = Vec::<TokenTree>::new();
-                let mut comma_encountered = false;
-                for t in inner.into_iter() {
-                    match t {
-                        TokenTree::Punct(p)
-                            if p.as_char() == ',' =>
-                        {
-                            if comma_encountered {
-                                return Err(Error::PathAttrParseError {
-                                    module: module_name.clone(),
-                                    e: PathAttrParseError::CfgAttrNotTwoParams,
-                                });
-                            }
-                            comma_encountered = true;
-                        }
-                        x => {
-                            if comma_encountered {
-                                ts_after_comma.push(x)
-                            } else {
-                                ts_before_comma.extend(std::iter::once(x))
-                            }
-                        }
-                    }
-                }
-                if !comma_encountered {
-                    return Err(Error::PathAttrParseError {
-                        module: module_name.clone(),
-                        e: PathAttrParseError::CfgAttrNotTwoParams,
-                    });
-                }
-
-                let mut pathy = false;
-                if ! ts_after_comma.is_empty() {
-                    match &ts_after_comma[0] {
-                        TokenTree::Ident(i)if i.to_string()
-                        == "path" => pathy = true,
-                        _ => (),
-                    }
-                }
-
-                if pathy {
-                    path_attrs.push((ts_after_comma[1..].to_vec(), Some(ts_before_comma)));
-                } else {
-                    attrs.push(attr.clone());
-                }
-            }
-            _ => attrs.push(attr.clone()),
-        }
-    }
-    Ok(())
-}
+mod attrs;
