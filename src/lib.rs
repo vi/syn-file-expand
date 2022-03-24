@@ -113,13 +113,13 @@ fn expand_impl<R: Resolver>(
     for item in content {
         let mut replacement_item = None;
         match item {
-            syn::Item::Mod(m) => {
-                match (&m.content, &m.semi) {
+            syn::Item::Mod(item_mod) => {
+                match (&item_mod.content, &item_mod.semi) {
                     (None, None) => panic!("A module without both `{{}}` and `;`?"),
                     (Some(_), Some(_)) => panic!("A module with both `{{}}` and `;`?"),
                     (Some(_), None) => (), // inline module
                     (None, Some(semi)) => {
-                        let id = m.ident.clone();
+                        let id = item_mod.ident.clone();
 
                         let mut inner_stack = modules_stack.clone();
                         inner_stack.push_back(id.clone());
@@ -157,108 +157,14 @@ fn expand_impl<R: Resolver>(
                             ),
                         };
 
-                        let mut attrs = Vec::with_capacity(m.attrs.len());
+                        let mut attrs = Vec::with_capacity(item_mod.attrs.len());
 
                         let mut inner : Option<Option<syn::File>> = None;
 
                         let mut dirs_candidate = Vector::new();
 
                         let mut path_attrs : Vec<(Vec<TokenTree>, Option<TokenStream>)> = Vec::new();
-                        for attr in &m.attrs {
-                            match &attr.path {
-                                x if x.get_ident().map(|x| x.to_string())
-                                    == Some("path".to_owned()) =>
-                                {
-                                    let tt = Vec::<TokenTree>::from_iter(
-                                        attr.tokens.clone(),
-                                    );
-                                    path_attrs.push((tt, None));
-                                }
-                                x if x.get_ident().map(|x| x.to_string())
-                                    == Some("cfg_attr".to_owned()) =>
-                                {
-                                    let tt = Vec::<TokenTree>::from_iter(
-                                        attr.tokens.clone(),
-                                    );
-                                    if tt.len() != 1 {
-                                        return Err(Error::PathAttrParseError {
-                                            module: mod_syn_path,
-                                            e: PathAttrParseError::CfgAttrNotRoundGroup,
-                                        });
-                                    }
-                                    let t = tt.into_iter().next().unwrap();
-                                    let g = match t {
-                                        TokenTree::Group(g)
-                                            if g.delimiter()
-                                                == proc_macro2::Delimiter::Parenthesis =>
-                                        {
-                                            g
-                                        }
-                                        _ => {
-                                            return Err(Error::PathAttrParseError {
-                                                module: mod_syn_path,
-                                                e: PathAttrParseError::CfgAttrNotRoundGroup,
-                                            })
-                                        }
-                                    };
-                                    let inner =
-                                        Vec::<TokenTree>::from_iter(g.stream());
-                                    if inner.len() < 3 {
-                                        return Err(Error::PathAttrParseError {
-                                            module: mod_syn_path,
-                                            e: PathAttrParseError::CfgAttrNotTwoParams,
-                                        });
-                                    }
-                                    let mut ts_before_comma = TokenStream::new();
-                                    let mut ts_after_comma = Vec::<TokenTree>::new();
-                                    let mut comma_encountered = false;
-                                    for t in inner.into_iter() {
-                                        match t {
-                                            TokenTree::Punct(p)
-                                                if p.as_char() == ',' =>
-                                            {
-                                                if comma_encountered {
-                                                    return Err(Error::PathAttrParseError {
-                                                        module: mod_syn_path,
-                                                        e: PathAttrParseError::CfgAttrNotTwoParams,
-                                                    });
-                                                }
-                                                comma_encountered = true;
-                                            }
-                                            x => {
-                                                if comma_encountered {
-                                                    ts_after_comma.push(x)
-                                                } else {
-                                                    ts_before_comma.extend(std::iter::once(x))
-                                                }
-                                            }
-                                        }
-                                    }
-                                    if !comma_encountered {
-                                        return Err(Error::PathAttrParseError {
-                                            module: mod_syn_path,
-                                            e: PathAttrParseError::CfgAttrNotTwoParams,
-                                        });
-                                    }
-
-                                    let mut pathy = false;
-                                    if ! ts_after_comma.is_empty() {
-                                        match &ts_after_comma[0] {
-                                            TokenTree::Ident(i)if i.to_string()
-                                            == "path" => pathy = true,
-                                            _ => (),
-                                        }
-                                    }
-
-                                    if pathy {
-                                        path_attrs.push((ts_after_comma[1..].to_vec(), Some(ts_before_comma)));
-                                    } else {
-                                        attrs.push(attr.clone());
-                                    }
-                                }
-                                _ => attrs.push(attr.clone()),
-                            }
-                        }
+                        extract_path_and_cfg_path_attrs(&item_mod.attrs, &mut path_attrs, &mod_syn_path, &mut attrs)?;
 
                         for (tt, cfg) in path_attrs {
                             if cfg.is_none() && inner.is_some() {
@@ -395,8 +301,8 @@ fn expand_impl<R: Resolver>(
 
                             let new_mod = syn::ItemMod {
                                 attrs,
-                                vis: m.vis.clone(),
-                                mod_token: m.mod_token,
+                                vis: item_mod.vis.clone(),
+                                mod_token: item_mod.mod_token,
                                 ident: id,
                                 content: Some((syn::token::Brace(semi.span), items)),
                                 semi: None,
@@ -410,6 +316,105 @@ fn expand_impl<R: Resolver>(
         }
         if let Some(ri) = replacement_item {
             *item = ri;
+        }
+    }
+    Ok(())
+}
+
+fn extract_path_and_cfg_path_attrs(input_attrs: &[syn::Attribute], path_attrs: &mut Vec<(Vec<TokenTree>, Option<TokenStream>)>, module_name: &syn::Path, attrs: &mut Vec<syn::Attribute>) -> Result<(), Error> {
+    for attr in input_attrs {
+        match &attr.path {
+            x if x.get_ident().map(|x| x.to_string())
+                == Some("path".to_owned()) =>
+            {
+                let tt = Vec::<TokenTree>::from_iter(
+                    attr.tokens.clone(),
+                );
+                path_attrs.push((tt, None));
+            }
+            x if x.get_ident().map(|x| x.to_string())
+                == Some("cfg_attr".to_owned()) =>
+            {
+                let tt = Vec::<TokenTree>::from_iter(
+                    attr.tokens.clone(),
+                );
+                if tt.len() != 1 {
+                    return Err(Error::PathAttrParseError {
+                        module: module_name.clone(),
+                        e: PathAttrParseError::CfgAttrNotRoundGroup,
+                    });
+                }
+                let t = tt.into_iter().next().unwrap();
+                let g = match t {
+                    TokenTree::Group(g)
+                        if g.delimiter()
+                            == proc_macro2::Delimiter::Parenthesis =>
+                    {
+                        g
+                    }
+                    _ => {
+                        return Err(Error::PathAttrParseError {
+                            module: module_name.clone(),
+                            e: PathAttrParseError::CfgAttrNotRoundGroup,
+                        })
+                    }
+                };
+                let inner =
+                    Vec::<TokenTree>::from_iter(g.stream());
+                if inner.len() < 3 {
+                    return Err(Error::PathAttrParseError {
+                        module: module_name.clone(),
+                        e: PathAttrParseError::CfgAttrNotTwoParams,
+                    });
+                }
+                let mut ts_before_comma = TokenStream::new();
+                let mut ts_after_comma = Vec::<TokenTree>::new();
+                let mut comma_encountered = false;
+                for t in inner.into_iter() {
+                    match t {
+                        TokenTree::Punct(p)
+                            if p.as_char() == ',' =>
+                        {
+                            if comma_encountered {
+                                return Err(Error::PathAttrParseError {
+                                    module: module_name.clone(),
+                                    e: PathAttrParseError::CfgAttrNotTwoParams,
+                                });
+                            }
+                            comma_encountered = true;
+                        }
+                        x => {
+                            if comma_encountered {
+                                ts_after_comma.push(x)
+                            } else {
+                                ts_before_comma.extend(std::iter::once(x))
+                            }
+                        }
+                    }
+                }
+                if !comma_encountered {
+                    return Err(Error::PathAttrParseError {
+                        module: module_name.clone(),
+                        e: PathAttrParseError::CfgAttrNotTwoParams,
+                    });
+                }
+
+                let mut pathy = false;
+                if ! ts_after_comma.is_empty() {
+                    match &ts_after_comma[0] {
+                        TokenTree::Ident(i)if i.to_string()
+                        == "path" => pathy = true,
+                        _ => (),
+                    }
+                }
+
+                if pathy {
+                    path_attrs.push((ts_after_comma[1..].to_vec(), Some(ts_before_comma)));
+                } else {
+                    attrs.push(attr.clone());
+                }
+            }
+            _ => attrs.push(attr.clone()),
         }
     }
     Ok(())
