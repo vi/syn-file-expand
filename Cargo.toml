@@ -1,0 +1,16 @@
+[package]
+name = "syn-file-expand"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+im-rc = "15.0.0"
+itertools = "0.10.3"
+proc-macro2 = "1.0.36"
+syn = { version = "1.0.88", features = ["full","extra-traits"] }
+thiserror = "1.0.30"
+
+[dev-dependencies]
+quote = "1.0.15"
