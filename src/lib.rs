@@ -161,6 +161,8 @@ fn expand_impl<R: Resolver>(
 
                         let mut inner : Option<Option<syn::File>> = None;
 
+                        let mut dirs_candidate = Vector::new();
+
                         let mut path_attrs : Vec<(Vec<TokenTree>, Option<TokenStream>)> = Vec::new();
                         for attr in &m.attrs {
                             match &attr.path {
@@ -201,7 +203,7 @@ fn expand_impl<R: Resolver>(
                                     };
                                     let inner =
                                         Vec::<TokenTree>::from_iter(g.stream());
-                                    if inner.len() != 3 {
+                                    if inner.len() < 3 {
                                         return Err(Error::PathAttrParseError {
                                             module: mod_syn_path,
                                             e: PathAttrParseError::CfgAttrNotTwoParams,
@@ -225,9 +227,9 @@ fn expand_impl<R: Resolver>(
                                             }
                                             x => {
                                                 if comma_encountered {
-                                                    ts_before_comma.extend(std::iter::once(x))
-                                                } else {
                                                     ts_after_comma.push(x)
+                                                } else {
+                                                    ts_before_comma.extend(std::iter::once(x))
                                                 }
                                             }
                                         }
@@ -253,7 +255,6 @@ fn expand_impl<R: Resolver>(
                                     } else {
                                         attrs.push(attr.clone());
                                     }
-                                    todo!()
                                 }
                                 _ => attrs.push(attr.clone()),
                             }
@@ -314,7 +315,7 @@ fn expand_impl<R: Resolver>(
                             }
                             module_file_explicit.push(explicit_path);
 
-                            let mut dirs_candidate = Vector::new();
+                            dirs_candidate = Vector::new();
                             if let Some(parent) = module_file_explicit.parent() {
                                 dirs_candidate.push_back(parent.to_owned());
                             }
@@ -335,10 +336,8 @@ fn expand_impl<R: Resolver>(
                                         );
                                     }
                                     inner = Some(Some(x));
-                                    dirs = dirs_candidate;
                                 }
                             } else {
-                                dirs = dirs_candidate;
                                 inner = Some(resolver.resolve(
                                     mod_syn_path.clone(),
                                     module_file_explicit,
@@ -348,6 +347,7 @@ fn expand_impl<R: Resolver>(
                         }
 
                         let inner = if let Some(i) = inner {
+                            dirs = dirs_candidate;
                             i
                         } else {
                             dirs.push_back(PathBuf::from(chunk));
