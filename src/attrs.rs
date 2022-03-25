@@ -54,14 +54,25 @@ pub(crate) fn extract_path_from_attr(
     Ok(explicit_path)
 }
 
-pub(crate) fn extract_path_and_cfg_path_attrs(
+pub(crate) fn read_and_process_attributes(
     input_attrs: &[syn::Attribute],
     path_attrs: &mut Vec<(Vec<TokenTree>, Option<TokenStream>)>,
-    module_name: &syn::Path,
     attrs: &mut Vec<syn::Attribute>,
-) -> Result<(), Error> {
+    cfg_attrs: &mut Vec<TokenStream>,
+) -> Result<(), crate::PathAttrParseError> {
     for attr in input_attrs {
         match &attr.path {
+            x if x.get_ident().map(|x| x.to_string()) == Some("cfg".to_owned()) => {
+                let tt = Vec::<TokenTree>::from_iter(attr.tokens.clone());
+                if tt.len() != 1 {
+                    return Err(PathAttrParseError::MalformedCfg);
+                }
+                let g = match tt.into_iter().next().unwrap() {
+                    TokenTree::Group(g) if g.delimiter() == proc_macro2::Delimiter::Parenthesis => g,
+                    _ => return Err(PathAttrParseError::MalformedCfg),
+                };
+                cfg_attrs.push(g.stream());
+            }
             x if x.get_ident().map(|x| x.to_string()) == Some("path".to_owned()) => {
                 let tt = Vec::<TokenTree>::from_iter(attr.tokens.clone());
                 path_attrs.push((tt, None));
@@ -69,10 +80,7 @@ pub(crate) fn extract_path_and_cfg_path_attrs(
             x if x.get_ident().map(|x| x.to_string()) == Some("cfg_attr".to_owned()) => {
                 let tt = Vec::<TokenTree>::from_iter(attr.tokens.clone());
                 if tt.len() != 1 {
-                    return Err(Error::PathAttrParseError {
-                        module: module_name.clone(),
-                        e: PathAttrParseError::CfgAttrNotRoundGroup,
-                    });
+                    return Err(PathAttrParseError::CfgAttrNotRoundGroup);
                 }
                 let t = tt.into_iter().next().unwrap();
                 let g = match t {
@@ -82,18 +90,12 @@ pub(crate) fn extract_path_and_cfg_path_attrs(
                         g
                     }
                     _ => {
-                        return Err(Error::PathAttrParseError {
-                            module: module_name.clone(),
-                            e: PathAttrParseError::CfgAttrNotRoundGroup,
-                        })
+                        return Err(PathAttrParseError::CfgAttrNotRoundGroup);
                     }
                 };
                 let inner = Vec::<TokenTree>::from_iter(g.stream());
                 if inner.len() < 3 {
-                    return Err(Error::PathAttrParseError {
-                        module: module_name.clone(),
-                        e: PathAttrParseError::CfgAttrNotTwoParams,
-                    });
+                    return Err(PathAttrParseError::CfgAttrNotTwoParams);
                 }
                 let mut ts_before_comma = TokenStream::new();
                 let mut ts_after_comma = Vec::<TokenTree>::new();
@@ -102,10 +104,7 @@ pub(crate) fn extract_path_and_cfg_path_attrs(
                     match t {
                         TokenTree::Punct(p) if p.as_char() == ',' => {
                             if comma_encountered {
-                                return Err(Error::PathAttrParseError {
-                                    module: module_name.clone(),
-                                    e: PathAttrParseError::CfgAttrNotTwoParams,
-                                });
+                                return Err(PathAttrParseError::CfgAttrNotTwoParams);
                             }
                             comma_encountered = true;
                         }
@@ -119,10 +118,7 @@ pub(crate) fn extract_path_and_cfg_path_attrs(
                     }
                 }
                 if !comma_encountered {
-                    return Err(Error::PathAttrParseError {
-                        module: module_name.clone(),
-                        e: PathAttrParseError::CfgAttrNotTwoParams,
-                    });
+                    return Err(PathAttrParseError::CfgAttrNotTwoParams);
                 }
 
                 let mut pathy = false;

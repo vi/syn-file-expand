@@ -20,6 +20,8 @@ pub enum PathAttrParseError {
     CfgAttrNotRoundGroup,
     #[error("#[cfg_attr] attribute does not have exactly two parameters")]
     CfgAttrNotTwoParams,
+    #[error("`#[cfg` is not followed by a sole round parentheses group")]
+    MalformedCfg,
 }
 
 #[derive(Error, Debug)]
@@ -40,8 +42,8 @@ pub enum Error {
         module: syn::Path,
         e: syn::parse::Error,
     },
-    #[error("Error from callback: {e}")]
-    ErrorFromCallback { e: UserError },
+    #[error("Error from callback: {e} when handling {module}", module=PathForDisplay(module))]
+    ErrorFromCallback {module: syn::Path, e: UserError },
 }
 
 struct PathForDisplay<'a>(&'a syn::Path);

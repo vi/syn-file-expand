@@ -364,3 +364,68 @@ fn cfg2() {
         Err(syn_file_expand::Error::MultipleExplicitPathsSpecifiedForOneModule { .. })
     ));
 }
+
+
+#[test]
+fn cfg3() {
+    let mut before: syn::File = syn::parse2(q! {
+        #[cfg(a1)]
+        struct Qqq;
+        #[cfg(a2)]
+        mod qqq;
+        #[cfg(a3)]
+        mod www;
+        #[cfg(a4)]
+        mod eee {
+            fn lol(){}
+        }
+    })
+    .unwrap();
+
+    syn_file_expand::expand_modules_into_inline_modules(
+        &mut before,
+        &mut H(
+            |_m, p: std::path::PathBuf| {
+                let p = p.as_os_str().to_string_lossy();
+                match p.as_ref() {
+                    "qqq/mod.rs" => Ok(None),
+                    "qqq.rs" => Ok(Some(
+                        syn::parse2(q! {
+                            #![lol]
+                        })
+                        .unwrap(),
+                    )),
+                    x => panic!("Unexpected callback: {}", x),
+                }
+            },
+            |cfg| {
+                let c = cfg.into_token_stream().to_string();
+                Ok(match c.as_ref() {
+                    "a2" => true,
+                    "a3" => false,
+                    x => panic!("Unexpected cfg call `{}`", x),
+                })
+            },
+        ),
+    )
+    .unwrap();
+
+    //println!("{}", before.to_token_stream().to_string());
+
+    let after: syn::File = syn::parse2(q! {
+        #[cfg(a1)]
+        struct Qqq;
+        mod qqq {
+            #![lol]
+        }
+        #[cfg(a3)]
+        mod www;
+        #[cfg(a4)]
+        mod eee {
+            fn lol(){}
+        }
+    })
+    .unwrap();
+
+    assert_eq!(before, after);
+}

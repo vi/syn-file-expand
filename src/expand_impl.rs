@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use im_rc::Vector;
-use proc_macro2::{TokenTree, TokenStream};
+use proc_macro2::{TokenStream, TokenTree};
 
-use crate::{Resolver, Error, attrs};
+use crate::{attrs, Error, Resolver};
 
 pub(crate) fn expand_impl<R: Resolver>(
     content: &mut Vec<syn::Item>,
@@ -12,7 +12,7 @@ pub(crate) fn expand_impl<R: Resolver>(
     relative_path_where_to_look_for_nested_modules_naturally: Vector<PathBuf>,
     relative_path_where_to_look_for_nested_modules_when_using_path_attribute: Vector<PathBuf>,
 ) -> Result<(), Error> {
-    for item in content {
+    'items_loop: for item in content {
         let (item_mod, semicolon_after_module_declaration) = match item {
             syn::Item::Mod(ref mut item_mod) => {
                 match (&item_mod.content, item_mod.semi) {
@@ -34,7 +34,8 @@ pub(crate) fn expand_impl<R: Resolver>(
         let chunk_rs = PathBuf::from(format!("{}.rs", id));
 
         let mut dirs_nat = relative_path_where_to_look_for_nested_modules_naturally.clone();
-        let mut dirs_attr = relative_path_where_to_look_for_nested_modules_when_using_path_attribute.clone();
+        let mut dirs_attr =
+            relative_path_where_to_look_for_nested_modules_when_using_path_attribute.clone();
 
         let len_hint = dirs_nat.len()
             + std::convert::identity::<usize>(dirs_attr.iter().map(|x| x.as_os_str().len()).sum())
@@ -71,12 +72,33 @@ pub(crate) fn expand_impl<R: Resolver>(
         let mut dirs_candidate = Vector::new();
 
         let mut path_attrs: Vec<(Vec<TokenTree>, Option<TokenStream>)> = Vec::new();
-        attrs::extract_path_and_cfg_path_attrs(
+        let mut cfg_attrs: Vec<TokenStream> = Vec::new();
+        attrs::read_and_process_attributes(
             &item_mod.attrs,
             &mut path_attrs,
-            &mod_syn_path,
             &mut attrs,
-        )?;
+            &mut cfg_attrs,
+        )
+        .map_err(|e| Error::PathAttrParseError {
+            module: mod_syn_path.clone(),
+            e,
+        })?;
+
+        for cfg in cfg_attrs {
+            let cfg: syn::Meta = syn::parse2(cfg).map_err(|e| Error::SynParseError {
+                module: mod_syn_path.clone(),
+                e,
+            })?;
+            if !resolver
+                .check_cfg(cfg)
+                .map_err(|e| Error::ErrorFromCallback {
+                    module: mod_syn_path.clone(),
+                    e,
+                })?
+            {
+                continue 'items_loop;
+            }
+        }
 
         for (tt, cfg) in path_attrs {
             if cfg.is_none() && inner.is_some() {
@@ -104,7 +126,13 @@ pub(crate) fn expand_impl<R: Resolver>(
                     module: mod_syn_path.clone(),
                     e,
                 })?;
-                if resolver.check_cfg(cfg).map_err(|e|Error::ErrorFromCallback{e})? {
+                if resolver
+                    .check_cfg(cfg)
+                    .map_err(|e| Error::ErrorFromCallback {
+                        module: mod_syn_path.clone(),
+                        e,
+                    })?
+                {
                     if inner.is_some() {
                         return Err(Error::MultipleExplicitPathsSpecifiedForOneModule {
                             module: mod_syn_path,
@@ -145,12 +173,12 @@ pub(crate) fn expand_impl<R: Resolver>(
                     dirs_attr = dirs_nat.clone();
                     dirs_nat.push_back(PathBuf::from(chunk.clone()));
                     Some(x)
-                },
+                }
                 (_, Ok(Some(x))) => {
                     dirs_nat.push_back(PathBuf::from(chunk.clone()));
                     dirs_attr = dirs_nat.clone();
                     Some(x)
-                },
+                }
                 (Err(e), _) => return Err(e),
                 (_, Err(e)) => return Err(e),
             }
