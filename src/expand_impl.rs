@@ -9,7 +9,8 @@ pub(crate) fn expand_impl<R: Resolver>(
     content: &mut Vec<syn::Item>,
     resolver: &mut R,
     modules_stack: Vector<syn::Ident>,
-    dirs: Vector<PathBuf>,
+    relative_path_where_to_look_for_nested_modules_naturally: Vector<PathBuf>,
+    relative_path_where_to_look_for_nested_modules_when_using_path_attribute: Vector<PathBuf>,
 ) -> Result<(), Error> {
     for item in content {
         let (item_mod, semicolon_after_module_declaration) = match item {
@@ -32,17 +33,18 @@ pub(crate) fn expand_impl<R: Resolver>(
         let chunk = PathBuf::from(format!("{}", id));
         let chunk_rs = PathBuf::from(format!("{}.rs", id));
 
-        let mut dirs = dirs.clone();
+        let mut dirs_nat = relative_path_where_to_look_for_nested_modules_naturally.clone();
+        let mut dirs_attr = relative_path_where_to_look_for_nested_modules_when_using_path_attribute.clone();
 
-        let len_hint = dirs.len()
-            + std::convert::identity::<usize>(dirs.iter().map(|x| x.as_os_str().len()).sum())
+        let len_hint = dirs_nat.len()
+            + std::convert::identity::<usize>(dirs_attr.iter().map(|x| x.as_os_str().len()).sum())
             + 8
             + chunk.as_os_str().len();
 
         let mut module_file_nomod = PathBuf::with_capacity(len_hint);
         let mut module_file_mod = PathBuf::with_capacity(len_hint);
 
-        for x in &dirs {
+        for x in &dirs_nat {
             module_file_mod.push(x);
             module_file_nomod.push(x);
         }
@@ -62,6 +64,8 @@ pub(crate) fn expand_impl<R: Resolver>(
 
         let mut attrs = Vec::with_capacity(item_mod.attrs.len());
 
+        // outer level of Option: whether we have expansion result based on path attribute results
+        // inner level of Option: whether expansion resulted in actual code
         let mut inner: Option<Option<syn::File>> = None;
 
         let mut dirs_candidate = Vector::new();
@@ -85,7 +89,7 @@ pub(crate) fn expand_impl<R: Resolver>(
 
             let mut module_file_explicit = PathBuf::with_capacity(len_hint);
 
-            for x in &dirs {
+            for x in &dirs_attr {
                 module_file_explicit.push(x);
             }
             module_file_explicit.push(explicit_path);
@@ -94,7 +98,6 @@ pub(crate) fn expand_impl<R: Resolver>(
             if let Some(parent) = module_file_explicit.parent() {
                 dirs_candidate.push_back(parent.to_owned());
             }
-            dirs_candidate.push_back(PathBuf::from(chunk.clone()));
 
             if let Some(cfg) = cfg {
                 let cfg: syn::Meta = syn::parse2(cfg).map_err(|e| Error::SynParseError {
@@ -117,10 +120,10 @@ pub(crate) fn expand_impl<R: Resolver>(
         }
 
         let inner = if let Some(i) = inner {
-            dirs = dirs_candidate;
+            dirs_attr = dirs_candidate.clone();
+            dirs_nat = dirs_candidate;
             i
         } else {
-            dirs.push_back(PathBuf::from(chunk));
             let inner_nomod = resolver.resolve(mod_syn_path.clone(), module_file_nomod, None);
             match inner_nomod {
                 Ok(_) => (),
@@ -140,8 +143,16 @@ pub(crate) fn expand_impl<R: Resolver>(
                     })
                 }
                 (Ok(None), Ok(None)) => None,
-                (Ok(Some(x)), _) => Some(x),
-                (_, Ok(Some(x))) => Some(x),
+                (Ok(Some(x)), _) => {
+                    dirs_attr = dirs_nat.clone();
+                    dirs_nat.push_back(PathBuf::from(chunk.clone()));
+                    Some(x)
+                },
+                (_, Ok(Some(x))) => {
+                    dirs_nat.push_back(PathBuf::from(chunk.clone()));
+                    dirs_attr = dirs_nat.clone();
+                    Some(x)
+                },
                 (Err(e), _) => return Err(e),
                 (_, Err(e)) => return Err(e),
             }
@@ -154,7 +165,8 @@ pub(crate) fn expand_impl<R: Resolver>(
                 attrs.push(attr);
             }
 
-            expand_impl(&mut items, resolver, inner_stack, dirs)?;
+            //dbg!(&inner_stack, &dirs_nat, &dirs_attr);
+            expand_impl(&mut items, resolver, inner_stack, dirs_nat, dirs_attr)?;
 
             let new_mod = syn::ItemMod {
                 attrs,
@@ -169,6 +181,6 @@ pub(crate) fn expand_impl<R: Resolver>(
             };
             *item = syn::Item::Mod(new_mod);
         }
-    }
+    } // end loop
     Ok(())
 }

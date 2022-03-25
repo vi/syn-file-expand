@@ -195,8 +195,8 @@ fn explicit_paths() {
                         .unwrap(),
                     ))
                 }
-                "qqq/www.rs" => return Ok(None),
-                "qqq/www/mod.rs" => {
+                "www.rs" => return Ok(None),
+                "www/mod.rs" => {
                     assert_eq!(
                         m.segments
                             .into_iter()
@@ -213,7 +213,7 @@ fn explicit_paths() {
                         .unwrap(),
                     ))
                 }
-                "qqq/www/../../eee.rs" => {
+                "www/../../eee.rs" => {
                     assert_eq!(
                         m.segments
                             .into_iter()
@@ -229,8 +229,8 @@ fn explicit_paths() {
                         .unwrap(),
                     ))
                 }
-                "qqq/www/../../eee/rrr.rs" => Ok(None),
-                "qqq/www/../../eee/rrr/mod.rs" => Ok(None),
+                "www/../../rrr.rs" => Ok(None),
+                "www/../../rrr/mod.rs" => Ok(None),
                 x => panic!("surpise path: {}", x),
             }
         },

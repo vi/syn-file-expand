@@ -70,6 +70,7 @@ pub trait Resolver {
     /// It is error to return more than one Ok(Some) for one module.
     ///
     /// Retuning Ok(None) for all potential files leaves the module unexpanded in `expand_modules_into_inline_modules` output.
+    /// Ok(None) may also be retured to signify non-existent file or `cfg` evaluating to false.
     fn resolve(
         &mut self,
         module_name: syn::Path,
@@ -100,7 +101,7 @@ pub fn expand_modules_into_inline_modules<R: Resolver>(
     resolver: &mut R,
 ) -> Result<(), Error> {
     let dirs = Vector::new();
-    expand_impl::expand_impl(&mut content.items, resolver, Vector::new(), dirs)?;
+    expand_impl::expand_impl(&mut content.items, resolver, Vector::new(), dirs.clone(), dirs)?;
     Ok(())
 }
 
