@@ -104,18 +104,16 @@ pub(crate) fn expand_impl<R: Resolver>(
                     module: mod_syn_path.clone(),
                     e,
                 })?;
-                if let Some(x) =
-                    resolver.resolve(mod_syn_path.clone(), module_file_explicit, Some(cfg))?
-                {
+                if resolver.check_cfg(cfg).map_err(|e|Error::ErrorFromCallback{e})? {
                     if inner.is_some() {
                         return Err(Error::MultipleExplicitPathsSpecifiedForOneModule {
                             module: mod_syn_path,
                         });
                     }
-                    inner = Some(Some(x));
+                    inner = Some(resolver.resolve(mod_syn_path.clone(), module_file_explicit)?);
                 }
             } else {
-                inner = Some(resolver.resolve(mod_syn_path.clone(), module_file_explicit, None)?);
+                inner = Some(resolver.resolve(mod_syn_path.clone(), module_file_explicit)?);
             }
         }
 
@@ -124,13 +122,13 @@ pub(crate) fn expand_impl<R: Resolver>(
             dirs_nat = dirs_candidate;
             i
         } else {
-            let inner_nomod = resolver.resolve(mod_syn_path.clone(), module_file_nomod, None);
+            let inner_nomod = resolver.resolve(mod_syn_path.clone(), module_file_nomod);
             match inner_nomod {
                 Ok(_) => (),
                 Err(Error::FailedToOpenFile { .. }) => (),
                 Err(e) => return Err(e),
             }
-            let inner_mod = resolver.resolve(mod_syn_path.clone(), module_file_mod.clone(), None);
+            let inner_mod = resolver.resolve(mod_syn_path.clone(), module_file_mod.clone());
             match inner_mod {
                 Ok(_) => (),
                 Err(Error::FailedToOpenFile { .. }) => (),

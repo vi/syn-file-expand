@@ -52,8 +52,6 @@ impl<'a> std::fmt::Display for PathForDisplay<'a> {
 }
 
 /// Data and configuration source for the progress of expansion.
-///
-/// You may specify a closure instead of a manual trait implementation.
 pub trait Resolver {
     /// Called by `expand_modules_into_inline_modules` each time a non-inline module is encountered.
     /// `module_name` is full path from the specified file root to the module being expanded,
@@ -70,25 +68,37 @@ pub trait Resolver {
     /// It is error to return more than one Ok(Some) for one module.
     ///
     /// Retuning Ok(None) for all potential files leaves the module unexpanded in `expand_modules_into_inline_modules` output.
-    /// Ok(None) may also be retured to signify non-existent file or `cfg` evaluating to false.
     fn resolve(
         &mut self,
         module_name: syn::Path,
         path_relative_to_crate_root: PathBuf,
-        cfg: Option<syn::Meta>,
     ) -> Result<Option<syn::File>, Error>;
+
+    /// When `#[cfg(mymeta)] mod ...;` or `#[cfg_attr(mymeta,path=...)]` is encountered, this function is called
+    /// and you should provide answer whether this cfg should be considered true or false.
+    fn check_cfg(&mut self, cfg: syn::Meta) -> Result<bool, UserError>;
 }
 
-impl<F: FnMut(syn::Path, PathBuf, Option<syn::Meta>) -> Result<Option<syn::File>, Error>> Resolver
-    for F
+/// Helper struct to define `Resolver` implementations using closures.
+pub struct ResolverHelper<F1, F2>(pub F1, pub F2)
+where
+    F1: FnMut(syn::Path, PathBuf) -> Result<Option<syn::File>, Error>,
+    F2: FnMut(syn::Meta) -> Result<bool, UserError>;
+impl<F1, F2> Resolver for ResolverHelper<F1, F2>
+where
+    F1: FnMut(syn::Path, PathBuf) -> Result<Option<syn::File>, Error>,
+    F2: FnMut(syn::Meta) -> Result<bool, UserError>,
 {
     fn resolve(
         &mut self,
         module_name: syn::Path,
         path_relative_to_crate_root: PathBuf,
-        cfg: Option<syn::Meta>,
     ) -> Result<Option<syn::File>, Error> {
-        (self)(module_name, path_relative_to_crate_root, cfg)
+        (self.0)(module_name, path_relative_to_crate_root)
+    }
+
+    fn check_cfg(&mut self, cfg: syn::Meta) -> Result<bool, UserError> {
+        (self.1)(cfg)
     }
 }
 
@@ -101,7 +111,13 @@ pub fn expand_modules_into_inline_modules<R: Resolver>(
     resolver: &mut R,
 ) -> Result<(), Error> {
     let dirs = Vector::new();
-    expand_impl::expand_impl(&mut content.items, resolver, Vector::new(), dirs.clone(), dirs)?;
+    expand_impl::expand_impl(
+        &mut content.items,
+        resolver,
+        Vector::new(),
+        dirs.clone(),
+        dirs,
+    )?;
     Ok(())
 }
 
@@ -110,14 +126,14 @@ pub fn expand_modules_into_inline_modules<R: Resolver>(
 /// If `#[cfg_attr(some_meta,path=...)]` is encountered while reading modules, your callback
 /// predicate `cfg_attr_path_handler` is called with `some_meta` and should decide whether to
 /// follow this cfg_attr or not
-/// 
-/// Just specify `|_|false` there if you are confused.
-/// 
+///
+/// Just specify `|_|Ok(false)` there if you are confused.
+///
 /// Security: Note that content of file being loaded may point to arbitrary file, including using absolute paths.
 /// Use IO-less `expand_modules_into_inline_modules` function if you want to control what is allowed to be read.
 pub fn read_full_crate_source_code(
     path: impl AsRef<std::path::Path>,
-    mut cfg_attr_path_handler: impl FnMut(syn::Meta) -> bool,
+    cfg_attr_path_handler: impl FnMut(syn::Meta) -> Result<bool, UserError>,
 ) -> Result<syn::File, Error> {
     let path = path.as_ref();
     let root_source = std::fs::read_to_string(path).map_err(|e| Error::FailedToOpenFile {
@@ -132,24 +148,50 @@ pub fn read_full_crate_source_code(
             },
             e,
         })?;
-    
+
     let parent_dir = path.parent();
 
-    expand_modules_into_inline_modules(&mut root_source, &mut |module_name: syn::Path, file_path: PathBuf, cfg| {
-        if let Some(cfg) = cfg {
-            if ! cfg_attr_path_handler(cfg) {
-                return Ok(None);
-            }
+    struct MyResolver<'a, F: FnMut(syn::Meta) -> Result<bool, UserError>> {
+        cfg_attr_path_handler: F,
+        parent_dir: Option<&'a std::path::Path>,
+    }
+
+    impl<'a, F: FnMut(syn::Meta) -> Result<bool,UserError>> Resolver for MyResolver<'a, F> {
+        fn resolve(
+            &mut self,
+            module_name: syn::Path,
+            path_relative_to_crate_root: PathBuf,
+        ) -> Result<Option<syn::File>, Error> {
+            let path = if let Some(parent_dir) = self.parent_dir {
+                parent_dir.join(&path_relative_to_crate_root)
+            } else {
+                path_relative_to_crate_root
+            };
+            let module_source =
+                std::fs::read_to_string(&path).map_err(|e| Error::FailedToOpenFile {
+                    path: path.clone(),
+                    e,
+                })?;
+            let module_source: syn::File =
+                syn::parse_file(&module_source).map_err(|e| Error::SynParseError {
+                    module: module_name,
+                    e,
+                })?;
+            Ok(Some(module_source))
         }
-        let path = if let Some(parent_dir) = parent_dir {
-            parent_dir.join(&file_path)
-        } else {
-            file_path
-        };
-        let module_source = std::fs::read_to_string(&path).map_err(|e|Error::FailedToOpenFile { path: path.clone(), e})?;
-        let module_source : syn::File = syn::parse_file(&module_source).map_err(|e|Error::SynParseError { module:module_name, e})?;
-        Ok(Some(module_source))
-    })?;
+
+        fn check_cfg(&mut self, cfg: syn::Meta) -> Result<bool, UserError> {
+            (self.cfg_attr_path_handler)(cfg)
+        }
+    }
+
+    expand_modules_into_inline_modules(
+        &mut root_source,
+        &mut MyResolver {
+            cfg_attr_path_handler,
+            parent_dir,
+        },
+    )?;
     Ok(root_source)
 }
 

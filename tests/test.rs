@@ -1,5 +1,7 @@
 use quote::{quote as q, ToTokens};
 
+use syn_file_expand::ResolverHelper as H;
+
 #[test]
 fn trivial() {
     let mut before: syn::File = syn::parse2(q! {
@@ -8,8 +10,11 @@ fn trivial() {
     })
     .unwrap();
 
-    syn_file_expand::expand_modules_into_inline_modules(&mut before, &mut |_m, _p, _c| Ok(None))
-        .unwrap();
+    syn_file_expand::expand_modules_into_inline_modules(
+        &mut before,
+        &mut H(|_m, _p| Ok(None), |_cfg| Ok(false)),
+    )
+    .unwrap();
 
     let after: syn::File = syn::parse2(q! {
         struct Qqq;
@@ -29,31 +34,32 @@ fn simple() {
     })
     .unwrap();
 
-    syn_file_expand::expand_modules_into_inline_modules(&mut before, &mut |m: syn::Path,
-                                                                           p,
-                                                                           c: Option<
-        syn::Meta,
-    >| {
-        if p == std::path::PathBuf::from("qqq/mod.rs") {
-            return Ok(None);
-        }
-        assert!(c.is_none());
-        assert_eq!(
-            m.segments
-                .into_iter()
-                .map(|x| x.ident.to_string())
-                .collect::<Vec<_>>(),
-            vec!["qqq".to_owned()]
-        );
-        assert_eq!(p, std::path::PathBuf::from("qqq.rs"));
-        Ok(Some(
-            syn::parse2(q! {
-                trait Ror {
+    syn_file_expand::expand_modules_into_inline_modules(
+        &mut before,
+        &mut H(
+            |m: syn::Path, p| {
+                if p == std::path::PathBuf::from("qqq/mod.rs") {
+                    return Ok(None);
                 }
-            })
-            .unwrap(),
-        ))
-    })
+                assert_eq!(
+                    m.segments
+                        .into_iter()
+                        .map(|x| x.ident.to_string())
+                        .collect::<Vec<_>>(),
+                    vec!["qqq".to_owned()]
+                );
+                assert_eq!(p, std::path::PathBuf::from("qqq.rs"));
+                Ok(Some(
+                    syn::parse2(q! {
+                        trait Ror {
+                        }
+                    })
+                    .unwrap(),
+                ))
+            },
+            |_cfg| Ok(false),
+        ),
+    )
     .unwrap();
 
     let after: syn::File = syn::parse2(q! {
@@ -80,65 +86,67 @@ fn nested1() {
 
     syn_file_expand::expand_modules_into_inline_modules(
         &mut before,
-        &mut |m: syn::Path, p: std::path::PathBuf, c: Option<syn::Meta>| {
-            let p = p.as_os_str().to_string_lossy();
+        &mut H(
+            |m: syn::Path, p: std::path::PathBuf| {
+                let p = p.as_os_str().to_string_lossy();
 
-            assert!(c.is_none());
-            match p.as_ref() {
-                "qqq/mod.rs" => return Ok(None),
-                "qqq.rs" => {
-                    assert_eq!(
-                        m.segments
-                            .into_iter()
-                            .map(|x| x.ident.to_string())
-                            .collect::<Vec<_>>(),
-                        vec!["qqq".to_owned()]
-                    );
-                    Ok(Some(
-                        syn::parse2(q! {
-                            trait Ror {
-                            }
-                            mod www;
-                        })
-                        .unwrap(),
-                    ))
+                match p.as_ref() {
+                    "qqq/mod.rs" => return Ok(None),
+                    "qqq.rs" => {
+                        assert_eq!(
+                            m.segments
+                                .into_iter()
+                                .map(|x| x.ident.to_string())
+                                .collect::<Vec<_>>(),
+                            vec!["qqq".to_owned()]
+                        );
+                        Ok(Some(
+                            syn::parse2(q! {
+                                trait Ror {
+                                }
+                                mod www;
+                            })
+                            .unwrap(),
+                        ))
+                    }
+                    "qqq/www.rs" => return Ok(None),
+                    "qqq/www/mod.rs" => {
+                        assert_eq!(
+                            m.segments
+                                .into_iter()
+                                .map(|x| x.ident.to_string())
+                                .collect::<Vec<_>>(),
+                            vec!["qqq".to_owned(), "www".to_owned()]
+                        );
+                        Ok(Some(
+                            syn::parse2(q! {
+                                mod eee;
+                                type Q = i32;
+                            })
+                            .unwrap(),
+                        ))
+                    }
+                    "qqq/www/eee.rs" => {
+                        assert_eq!(
+                            m.segments
+                                .into_iter()
+                                .map(|x| x.ident.to_string())
+                                .collect::<Vec<_>>(),
+                            vec!["qqq".to_owned(), "www".to_owned(), "eee".to_owned()]
+                        );
+                        Ok(Some(
+                            syn::parse2(q! {
+                                fn r(_x:i32){}
+                            })
+                            .unwrap(),
+                        ))
+                    }
+                    "qqq/www/eee/mod.rs" => return Ok(None),
+                    x => panic!("surpise path: {}", x),
                 }
-                "qqq/www.rs" => return Ok(None),
-                "qqq/www/mod.rs" => {
-                    assert_eq!(
-                        m.segments
-                            .into_iter()
-                            .map(|x| x.ident.to_string())
-                            .collect::<Vec<_>>(),
-                        vec!["qqq".to_owned(), "www".to_owned()]
-                    );
-                    Ok(Some(
-                        syn::parse2(q! {
-                            mod eee;
-                            type Q = i32;
-                        })
-                        .unwrap(),
-                    ))
-                }
-                "qqq/www/eee.rs" => {
-                    assert_eq!(
-                        m.segments
-                            .into_iter()
-                            .map(|x| x.ident.to_string())
-                            .collect::<Vec<_>>(),
-                        vec!["qqq".to_owned(), "www".to_owned(), "eee".to_owned()]
-                    );
-                    Ok(Some(
-                        syn::parse2(q! {
-                            fn r(_x:i32){}
-                        })
-                        .unwrap(),
-                    ))
-                }
-                "qqq/www/eee/mod.rs" => return Ok(None),
-                x => panic!("surpise path: {}", x),
-            }
-        },
+            },
+            |_cfg| Ok(false),
+        ),
     )
     .unwrap();
 
@@ -173,67 +181,69 @@ fn explicit_paths() {
 
     syn_file_expand::expand_modules_into_inline_modules(
         &mut before,
-        &mut |m: syn::Path, p: std::path::PathBuf, c: Option<syn::Meta>| {
-            let p = p.as_os_str().to_string_lossy();
+        &mut H(
+            |m: syn::Path, p: std::path::PathBuf| {
+                let p = p.as_os_str().to_string_lossy();
 
-            assert!(c.is_none());
-            match p.as_ref() {
-                "qqq.rs" => {
-                    assert_eq!(
-                        m.segments
-                            .into_iter()
-                            .map(|x| x.ident.to_string())
-                            .collect::<Vec<_>>(),
-                        vec!["qqq".to_owned()]
-                    );
-                    Ok(Some(
-                        syn::parse2(q! {
-                            trait Ror {
-                            }
-                            mod www;
-                        })
-                        .unwrap(),
-                    ))
+                match p.as_ref() {
+                    "qqq.rs" => {
+                        assert_eq!(
+                            m.segments
+                                .into_iter()
+                                .map(|x| x.ident.to_string())
+                                .collect::<Vec<_>>(),
+                            vec!["qqq".to_owned()]
+                        );
+                        Ok(Some(
+                            syn::parse2(q! {
+                                trait Ror {
+                                }
+                                mod www;
+                            })
+                            .unwrap(),
+                        ))
+                    }
+                    "www.rs" => return Ok(None),
+                    "www/mod.rs" => {
+                        assert_eq!(
+                            m.segments
+                                .into_iter()
+                                .map(|x| x.ident.to_string())
+                                .collect::<Vec<_>>(),
+                            vec!["qqq".to_owned(), "www".to_owned()]
+                        );
+                        Ok(Some(
+                            syn::parse2(q! {
+                                #[path="../../eee.rs"]
+                                mod eee;
+                                type Q = i32;
+                            })
+                            .unwrap(),
+                        ))
+                    }
+                    "www/../../eee.rs" => {
+                        assert_eq!(
+                            m.segments
+                                .into_iter()
+                                .map(|x| x.ident.to_string())
+                                .collect::<Vec<_>>(),
+                            vec!["qqq".to_owned(), "www".to_owned(), "eee".to_owned()]
+                        );
+                        Ok(Some(
+                            syn::parse2(q! {
+                                fn r(_x:i32){}
+                                pub mod rrr;
+                            })
+                            .unwrap(),
+                        ))
+                    }
+                    "www/../../rrr.rs" => Ok(None),
+                    "www/../../rrr/mod.rs" => Ok(None),
+                    x => panic!("surpise path: {}", x),
                 }
-                "www.rs" => return Ok(None),
-                "www/mod.rs" => {
-                    assert_eq!(
-                        m.segments
-                            .into_iter()
-                            .map(|x| x.ident.to_string())
-                            .collect::<Vec<_>>(),
-                        vec!["qqq".to_owned(), "www".to_owned()]
-                    );
-                    Ok(Some(
-                        syn::parse2(q! {
-                            #[path="../../eee.rs"]
-                            mod eee;
-                            type Q = i32;
-                        })
-                        .unwrap(),
-                    ))
-                }
-                "www/../../eee.rs" => {
-                    assert_eq!(
-                        m.segments
-                            .into_iter()
-                            .map(|x| x.ident.to_string())
-                            .collect::<Vec<_>>(),
-                        vec!["qqq".to_owned(), "www".to_owned(), "eee".to_owned()]
-                    );
-                    Ok(Some(
-                        syn::parse2(q! {
-                            fn r(_x:i32){}
-                            pub mod rrr;
-                        })
-                        .unwrap(),
-                    ))
-                }
-                "www/../../rrr.rs" => Ok(None),
-                "www/../../rrr/mod.rs" => Ok(None),
-                x => panic!("surpise path: {}", x),
-            }
-        },
+            },
+            |_cfg| Ok(false),
+        ),
     )
     .unwrap();
 
@@ -269,25 +279,40 @@ fn cfg1() {
     })
     .unwrap();
 
-    syn_file_expand::expand_modules_into_inline_modules(&mut before, &mut |_m, p: std::path::PathBuf, c: Option<syn::Meta>| {
-        let p = p.as_os_str().to_string_lossy();
-        let c = c.map(|x|x.into_token_stream().to_string());
-        match (p.as_ref(), c.as_deref()) {
-            ("lol.rs", Some("feature = \"lol\"")) => Ok(None),
-            ("win.rs", Some("windows")) => Ok(Some(syn::parse2(q! {
-                #![lol]
-            }).unwrap())),
-            (x,y) => panic!("Unexpected callback: {} {:?}", x, y),
-        }
-    })
-        .unwrap();
+    syn_file_expand::expand_modules_into_inline_modules(
+        &mut before,
+        &mut H(
+            |_m, p: std::path::PathBuf| {
+                let p = p.as_os_str().to_string_lossy();
+                match p.as_ref() {
+                    "lol.rs" => Ok(None),
+                    "win.rs" => Ok(Some(
+                        syn::parse2(q! {
+                            #![lol]
+                        })
+                        .unwrap(),
+                    )),
+                    x => panic!("Unexpected callback: {}", x),
+                }
+            },
+            |cfg| {
+                let c = cfg.into_token_stream().to_string();
+                Ok(match c.as_ref() {
+                    "feature = \"lol\"" => false,
+                    "windows" => true,
+                    x => panic!("Unexpected cfg call `{}`", x),
+                })
+            },
+        ),
+    )
+    .unwrap();
 
     //println!("{}", before.to_token_stream().to_string());
 
     let after: syn::File = syn::parse2(q! {
         struct Qqq;
         #[cfg_attr(qqq,www)]
-        mod qqq { 
+        mod qqq {
             #![lol]
         }
         fn lol(){}
@@ -296,7 +321,6 @@ fn cfg1() {
 
     assert_eq!(before, after);
 }
-
 
 #[test]
 fn cfg2() {
@@ -309,17 +333,34 @@ fn cfg2() {
     })
     .unwrap();
 
-    let ret = syn_file_expand::expand_modules_into_inline_modules(&mut before, &mut |_m, p: std::path::PathBuf, c: Option<syn::Meta>| {
-        let p = p.as_os_str().to_string_lossy();
-        let c = c.map(|x|x.into_token_stream().to_string());
-        match (p.as_ref(), c.as_deref()) {
-            ("lol.rs", Some("feature = \"lol\""))
-            | ("win.rs", Some("windows")) => Ok(Some(syn::parse2(q! {
-                #![lol]
-            }).unwrap())),
-            (x,y) => panic!("Unexpected callback: {} {:?}", x, y),
-        }
-    });
+    let ret = syn_file_expand::expand_modules_into_inline_modules(
+        &mut before,
+        &mut H(
+            |_m, p: std::path::PathBuf| {
+                let p = p.as_os_str().to_string_lossy();
+                match p.as_ref() {
+                    "lol.rs" | "win.rs" => Ok(Some(
+                        syn::parse2(q! {
+                            #![lol]
+                        })
+                        .unwrap(),
+                    )),
+                    x => panic!("Unexpected callback: {}", x),
+                }
+            },
+            |cfg| {
+                let c = cfg.into_token_stream().to_string();
+                Ok(match c.as_ref() {
+                    "feature = \"lol\"" => true,
+                    "windows" => true,
+                    x => panic!("Unexpected cfg call `{}`", x),
+                })
+            },
+        ),
+    );
 
-    assert!(matches!(ret, Err(syn_file_expand::Error::MultipleExplicitPathsSpecifiedForOneModule{..})));
+    assert!(matches!(
+        ret,
+        Err(syn_file_expand::Error::MultipleExplicitPathsSpecifiedForOneModule { .. })
+    ));
 }
