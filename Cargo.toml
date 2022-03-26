@@ -2,8 +2,13 @@
 name = "syn-file-expand"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+readme = "README.md"
+license = "MIT/Apache-2.0"
+repository = "https://github.com/vi/syn-file-expand"
+description = "Library and a CLI tool to load full source code of multi-file crates"
+keywords = ["expand","rust","source-code","inline-modules"]
+categories = ["command-line-utilities", "development-tools::procedural-macro-helpers"]
+include = ["src","Cargo.toml","tests", "examples", "resources", "README.md"]
 
 [dependencies]
 im-rc = "15.0.0"
