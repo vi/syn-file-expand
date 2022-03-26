@@ -48,7 +48,7 @@ fn get_env_name(input: proc_macro2::TokenStream) -> String {
 fn main() -> Result<(), syn_file_expand::Error> {
     let args = Vec::<OsString>::from_iter(std::env::args_os());
     if args.len() != 2 {
-        println!("Usage: expand <Rust source file>");
+        println!("Usage: synfileexpand <Rust source file>");
         println!("Reads rust source file, including referred modules and expands them into a single source with all modules inline");
         println!("Conditional paths like #[cfg_attr(feature=\"qqq\"),path=...) are resolved using");
         println!("environment variables like SYN_FILE_EXPAND_FEATURE_QQQ=1");
