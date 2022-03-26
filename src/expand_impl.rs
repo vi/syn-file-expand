@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use im_rc::Vector;
 use proc_macro2::{TokenStream, TokenTree};
 
-use crate::{attrs, Error, Resolver};
+use crate::{attrs, Error, Resolver, ErrorCase};
 
 pub(crate) fn expand_impl<R: Resolver>(
     content: &mut Vec<syn::Item>,
@@ -63,6 +63,11 @@ pub(crate) fn expand_impl<R: Resolver>(
             })),
         };
 
+        let err = |c| Error {
+            module: mod_syn_path.clone(),
+            inner: c,
+        };
+
         let mut attrs = Vec::with_capacity(item_mod.attrs.len());
 
         // outer level of Option: whether we have expansion result based on path attribute results
@@ -79,21 +84,18 @@ pub(crate) fn expand_impl<R: Resolver>(
             &mut attrs,
             &mut cfg_attrs,
         )
-        .map_err(|e| Error::PathAttrParseError {
+        .map_err(|e| Error {
             module: mod_syn_path.clone(),
-            e,
+            inner: ErrorCase::AttrParseError(e),
         })?;
 
         for cfg in cfg_attrs {
-            let cfg: syn::Meta = syn::parse2(cfg).map_err(|e| Error::SynParseError {
-                module: mod_syn_path.clone(),
-                e,
-            })?;
+            let cfg: syn::Meta = syn::parse2(cfg).map_err(|e| err(ErrorCase::SynParseError(e)))?;
             if !resolver
                 .check_cfg(cfg)
-                .map_err(|e| Error::ErrorFromCallback {
+                .map_err(|e| Error {
                     module: mod_syn_path.clone(),
-                    e,
+                    inner: ErrorCase::ErrorFromCallback(e),
                 })?
             {
                 continue 'items_loop;
@@ -102,9 +104,7 @@ pub(crate) fn expand_impl<R: Resolver>(
 
         for (tt, cfg) in path_attrs {
             if cfg.is_none() && inner.is_some() {
-                return Err(Error::MultipleExplicitPathsSpecifiedForOneModule {
-                    module: mod_syn_path,
-                });
+                return Err(err(ErrorCase::MultipleExplicitPathsSpecifiedForOneModule));
             }
 
             let explicit_path = attrs::extract_path_from_attr(tt, &mod_syn_path)?;
@@ -122,21 +122,13 @@ pub(crate) fn expand_impl<R: Resolver>(
             }
 
             if let Some(cfg) = cfg {
-                let cfg: syn::Meta = syn::parse2(cfg).map_err(|e| Error::SynParseError {
-                    module: mod_syn_path.clone(),
-                    e,
-                })?;
+                let cfg: syn::Meta = syn::parse2(cfg).map_err(|e| err(ErrorCase::SynParseError(e)))?;
                 if resolver
                     .check_cfg(cfg)
-                    .map_err(|e| Error::ErrorFromCallback {
-                        module: mod_syn_path.clone(),
-                        e,
-                    })?
+                    .map_err(|e| err(ErrorCase::ErrorFromCallback(e)))?
                 {
                     if inner.is_some() {
-                        return Err(Error::MultipleExplicitPathsSpecifiedForOneModule {
-                            module: mod_syn_path,
-                        });
+                        return Err(err(ErrorCase::MultipleExplicitPathsSpecifiedForOneModule));
                     }
                     inner = Some(resolver.resolve(mod_syn_path.clone(), module_file_explicit)?);
                 }
@@ -153,20 +145,18 @@ pub(crate) fn expand_impl<R: Resolver>(
             let inner_nomod = resolver.resolve(mod_syn_path.clone(), module_file_nomod);
             match inner_nomod {
                 Ok(_) => (),
-                Err(Error::FailedToOpenFile { .. }) => (),
+                Err(Error{inner: ErrorCase::FailedToOpenFile { .. }, ..}) => (),
                 Err(e) => return Err(e),
             }
             let inner_mod = resolver.resolve(mod_syn_path.clone(), module_file_mod.clone());
             match inner_mod {
                 Ok(_) => (),
-                Err(Error::FailedToOpenFile { .. }) => (),
+                Err(Error{inner: ErrorCase::FailedToOpenFile { .. }, ..}) => (),
                 Err(e) => return Err(e),
             }
             match (inner_nomod, inner_mod) {
                 (Ok(Some(_)), Ok(Some(_))) => {
-                    return Err(Error::BothModRsAndNameRsPresent {
-                        module: mod_syn_path,
-                    })
+                    return Err(err(ErrorCase::BothModRsAndNameRsPresent))
                 }
                 (Ok(None), Ok(None)) => None,
                 (Ok(Some(x)), _) => {

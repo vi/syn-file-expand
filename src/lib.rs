@@ -33,28 +33,32 @@ pub enum AttrParseError {
     MalformedCfg,
 }
 
-/// Main error type that is returned from functions of this crate, as well as from some user callbacks.
+/// Specifics of error when expanding a particular module
 #[allow(missing_docs)]
 #[derive(Error, Debug)]
-pub enum Error {
+pub enum ErrorCase {
     #[error("Cannot open file {path}: {e}")]
     FailedToOpenFile { path: PathBuf, e: std::io::Error },
-    #[error("The module have multiple explicit #[path] directives for {module}", module=PathForDisplay(module))]
-    MultipleExplicitPathsSpecifiedForOneModule { module: syn::Path },
-    #[error("Both name/mod.rs and name.rs present for {module}", module=PathForDisplay(module))]
-    BothModRsAndNameRsPresent { module: syn::Path },
-    #[error("error parsing path or cfg_attr path attribute in {module}: {e}", module=PathForDisplay(module))]
-    PathAttrParseError {
-        module: syn::Path,
-        e: AttrParseError,
-    },
-    #[error("parsing error: {e} in {module}", module=PathForDisplay(module))]
-    SynParseError {
-        module: syn::Path,
-        e: syn::parse::Error,
-    },
-    #[error("Error from callback: {e} when handling {module}", module=PathForDisplay(module))]
-    ErrorFromCallback {module: syn::Path, e: UserError },
+    #[error("The module have multiple explicit #[path] directives")]
+    MultipleExplicitPathsSpecifiedForOneModule,
+    #[error("Both name/mod.rs and name.rs present")]
+    BothModRsAndNameRsPresent,
+    #[error("error parsing attribute: {0}")]
+    AttrParseError(AttrParseError),
+    #[error("syn parsing error: {0}")]
+    SynParseError(syn::parse::Error),
+    #[error("Error from callback: {0}")]
+    ErrorFromCallback(UserError),
+}
+
+/// Main error type that is returned from functions of this crate, as well as from some user callbacks.
+#[derive(Error, Debug)]
+#[error("Expanding module `{module}`: {inner}", module=PathForDisplay(module))]
+pub struct Error {
+    /// Module being expanded. Root module is represented by an empty path.
+    pub module: syn::Path,
+    /// Specific error
+    pub inner: ErrorCase,
 }
 
 struct PathForDisplay<'a>(&'a syn::Path);
@@ -117,13 +121,13 @@ where
 /// but with `mod something;` expanded into `mod something { ... }`.
 ///
 /// It is low-level IO-agnostic function: your callback is responsible for reading and parsing the data.
-/// 
+///
 /// Use [`read_full_crate_source_code`] for easy way to just load crate source code.
-/// 
+///
 /// Example:
-/// 
+///
 /// ```
-/// # fn main() -> Result<(), syn_file_expand::Error> { 
+/// # fn main() -> Result<(), syn_file_expand::Error> {
 /// let mut ast: syn::File = syn::parse2(quote::quote! {
 ///     mod inner_module;
 /// }).unwrap();
@@ -140,13 +144,13 @@ where
 /// };
 /// let mut resolver = syn_file_expand::ResolverHelper(code_loader, cfg_evaluator);
 /// syn_file_expand::expand_modules_into_inline_modules(&mut ast, &mut resolver)?;
-/// 
+///
 /// let expanded: syn::File = syn::parse2(quote::quote! {
 ///     mod inner_module {
 ///         trait Foo { }
 ///     }
 /// }).unwrap();
-/// 
+///
 /// assert_eq!(ast, expanded);
 /// #   Ok(())
 /// # }
@@ -176,15 +180,15 @@ pub fn expand_modules_into_inline_modules<R: Resolver>(
 ///
 /// **Security**: Note that content of file being loaded may point to arbitrary file, including using absolute paths.
 /// Use IO-less [`expand_modules_into_inline_modules`] function if you want to control what is allowed to be read.
-/// 
+///
 /// Example:
-/// 
+///
 /// ```
 /// # fn main() -> Result<(), syn_file_expand::Error> {
 /// let mut input_file = std::path::PathBuf::new();
 /// # input_file.push(env!("CARGO_MANIFEST_DIR"));
-/// input_file.push("src"); 
-/// input_file.push("lib.rs"); 
+/// input_file.push("src");
+/// input_file.push("lib.rs");
 /// let ast : syn::File = syn_file_expand::read_full_crate_source_code(input_file, |_|Ok(false))?;
 /// assert!(ast.items.iter()
 ///    .filter_map(|x|match x { syn::Item::Fn(y) => Some(y), _ => None})
@@ -199,18 +203,23 @@ pub fn read_full_crate_source_code(
     cfg_attr_path_handler: impl FnMut(syn::Meta) -> Result<bool, UserError>,
 ) -> Result<syn::File, Error> {
     let path = path.as_ref();
-    let root_source = std::fs::read_to_string(path).map_err(|e| Error::FailedToOpenFile {
-        path: path.to_owned(),
-        e,
-    })?;
-    let mut root_source: syn::File =
-        syn::parse_file(&root_source).map_err(|e| Error::SynParseError {
-            module: syn::Path {
-                leading_colon: None,
-                segments: syn::punctuated::Punctuated::new(),
-            },
+    let root_source = std::fs::read_to_string(path).map_err(|e| Error {
+        module: syn::Path {
+            leading_colon: None,
+            segments: syn::punctuated::Punctuated::new(),
+        },
+        inner: ErrorCase::FailedToOpenFile {
+            path: path.to_owned(),
             e,
-        })?;
+        },
+    })?;
+    let mut root_source: syn::File = syn::parse_file(&root_source).map_err(|e| Error {
+        module: syn::Path {
+            leading_colon: None,
+            segments: syn::punctuated::Punctuated::new(),
+        },
+        inner: ErrorCase::SynParseError(e),
+    })?;
 
     let parent_dir = path.parent();
 
@@ -219,7 +228,7 @@ pub fn read_full_crate_source_code(
         parent_dir: Option<&'a std::path::Path>,
     }
 
-    impl<'a, F: FnMut(syn::Meta) -> Result<bool,UserError>> Resolver for MyResolver<'a, F> {
+    impl<'a, F: FnMut(syn::Meta) -> Result<bool, UserError>> Resolver for MyResolver<'a, F> {
         fn resolve(
             &mut self,
             module_name: syn::Path,
@@ -230,16 +239,17 @@ pub fn read_full_crate_source_code(
             } else {
                 path_relative_to_crate_root
             };
-            let module_source =
-                std::fs::read_to_string(&path).map_err(|e| Error::FailedToOpenFile {
+            let module_source = std::fs::read_to_string(&path).map_err(|e| Error {
+                module: module_name.clone(),
+                inner: ErrorCase::FailedToOpenFile {
                     path: path.clone(),
                     e,
-                })?;
-            let module_source: syn::File =
-                syn::parse_file(&module_source).map_err(|e| Error::SynParseError {
-                    module: module_name,
-                    e,
-                })?;
+                },
+            })?;
+            let module_source: syn::File = syn::parse_file(&module_source).map_err(|e| Error {
+                module: module_name,
+                inner: ErrorCase::SynParseError(e),
+            })?;
             Ok(Some(module_source))
         }
 

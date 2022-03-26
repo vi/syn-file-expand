@@ -1,6 +1,8 @@
 use proc_macro2;
 use proc_macro2::TokenStream;
 
+use crate::ErrorCase;
+
 use super::AttrParseError;
 
 use super::Error;
@@ -13,42 +15,37 @@ pub(crate) fn extract_path_from_attr(
     tt: Vec<TokenTree>,
     mod_syn_path: &syn::Path,
 ) -> Result<PathBuf, Error> {
+    let ape = |x|Err(Error {
+        module: mod_syn_path.clone(),
+        inner: ErrorCase::AttrParseError(x),
+    }); 
     if tt.len() != 2 {
-        return Err(Error::PathAttrParseError {
+        return Err(Error {
             module: mod_syn_path.clone(),
-            e: AttrParseError::NotExactlyTwoTokens,
+            inner: ErrorCase::AttrParseError(AttrParseError::NotExactlyTwoTokens),
         });
     }
     match &tt[0] {
         TokenTree::Punct(x) if x.as_char() == '=' => (),
         _ => {
-            return Err(Error::PathAttrParseError {
-                module: mod_syn_path.clone(),
-                e: AttrParseError::FirstTokenIsNotEqualSign,
-            })
+            return ape(AttrParseError::FirstTokenIsNotEqualSign);
         }
     }
     match &tt[1] {
         TokenTree::Literal(_) => (),
         _ => {
-            return Err(Error::PathAttrParseError {
-                module: mod_syn_path.clone(),
-                e: AttrParseError::SecondTokenIsNotStringLiteral,
-            })
+            return ape(AttrParseError::SecondTokenIsNotStringLiteral)
         }
     }
     let ts = TokenStream::from(tt[1].clone());
-    let tslit: syn::Lit = syn::parse2(ts).map_err(|e| Error::SynParseError {
+    let tslit: syn::Lit = syn::parse2(ts).map_err(|e| Error {
         module: mod_syn_path.clone(),
-        e,
+        inner: ErrorCase::SynParseError(e),
     })?;
     let explicit_path = match tslit {
         syn::Lit::Str(x) => PathBuf::from(x.value()),
         _ => {
-            return Err(Error::PathAttrParseError {
-                module: mod_syn_path.clone(),
-                e: AttrParseError::SecondTokenIsNotStringLiteral,
-            })
+            return ape(AttrParseError::SecondTokenIsNotStringLiteral)
         }
     };
     Ok(explicit_path)
@@ -59,7 +56,7 @@ pub(crate) fn read_and_process_attributes(
     path_attrs: &mut Vec<(Vec<TokenTree>, Option<TokenStream>)>,
     attrs: &mut Vec<syn::Attribute>,
     cfg_attrs: &mut Vec<TokenStream>,
-) -> Result<(), crate::AttrParseError> {
+) -> Result<(), AttrParseError> {
     for attr in input_attrs {
         match &attr.path {
             x if x.get_ident().map(|x| x.to_string()) == Some("cfg".to_owned()) => {

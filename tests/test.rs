@@ -361,10 +361,12 @@ fn cfg2() {
 
     assert!(matches!(
         ret,
-        Err(syn_file_expand::Error::MultipleExplicitPathsSpecifiedForOneModule { .. })
+        Err(syn_file_expand::Error {
+            inner: syn_file_expand::ErrorCase::MultipleExplicitPathsSpecifiedForOneModule,
+            ..
+        })
     ));
 }
-
 
 #[test]
 fn cfg3() {
