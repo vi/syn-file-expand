@@ -1,7 +1,7 @@
 use proc_macro2;
 use proc_macro2::TokenStream;
 
-use super::PathAttrParseError;
+use super::AttrParseError;
 
 use super::Error;
 
@@ -16,7 +16,7 @@ pub(crate) fn extract_path_from_attr(
     if tt.len() != 2 {
         return Err(Error::PathAttrParseError {
             module: mod_syn_path.clone(),
-            e: PathAttrParseError::NotExactlyTwoTokens,
+            e: AttrParseError::NotExactlyTwoTokens,
         });
     }
     match &tt[0] {
@@ -24,7 +24,7 @@ pub(crate) fn extract_path_from_attr(
         _ => {
             return Err(Error::PathAttrParseError {
                 module: mod_syn_path.clone(),
-                e: PathAttrParseError::FirstTokenIsNotEqualSign,
+                e: AttrParseError::FirstTokenIsNotEqualSign,
             })
         }
     }
@@ -33,7 +33,7 @@ pub(crate) fn extract_path_from_attr(
         _ => {
             return Err(Error::PathAttrParseError {
                 module: mod_syn_path.clone(),
-                e: PathAttrParseError::SecondTokenIsNotStringLiteral,
+                e: AttrParseError::SecondTokenIsNotStringLiteral,
             })
         }
     }
@@ -47,7 +47,7 @@ pub(crate) fn extract_path_from_attr(
         _ => {
             return Err(Error::PathAttrParseError {
                 module: mod_syn_path.clone(),
-                e: PathAttrParseError::SecondTokenIsNotStringLiteral,
+                e: AttrParseError::SecondTokenIsNotStringLiteral,
             })
         }
     };
@@ -59,17 +59,17 @@ pub(crate) fn read_and_process_attributes(
     path_attrs: &mut Vec<(Vec<TokenTree>, Option<TokenStream>)>,
     attrs: &mut Vec<syn::Attribute>,
     cfg_attrs: &mut Vec<TokenStream>,
-) -> Result<(), crate::PathAttrParseError> {
+) -> Result<(), crate::AttrParseError> {
     for attr in input_attrs {
         match &attr.path {
             x if x.get_ident().map(|x| x.to_string()) == Some("cfg".to_owned()) => {
                 let tt = Vec::<TokenTree>::from_iter(attr.tokens.clone());
                 if tt.len() != 1 {
-                    return Err(PathAttrParseError::MalformedCfg);
+                    return Err(AttrParseError::MalformedCfg);
                 }
                 let g = match tt.into_iter().next().unwrap() {
                     TokenTree::Group(g) if g.delimiter() == proc_macro2::Delimiter::Parenthesis => g,
-                    _ => return Err(PathAttrParseError::MalformedCfg),
+                    _ => return Err(AttrParseError::MalformedCfg),
                 };
                 cfg_attrs.push(g.stream());
             }
@@ -80,7 +80,7 @@ pub(crate) fn read_and_process_attributes(
             x if x.get_ident().map(|x| x.to_string()) == Some("cfg_attr".to_owned()) => {
                 let tt = Vec::<TokenTree>::from_iter(attr.tokens.clone());
                 if tt.len() != 1 {
-                    return Err(PathAttrParseError::CfgAttrNotRoundGroup);
+                    return Err(AttrParseError::CfgAttrNotRoundGroup);
                 }
                 let t = tt.into_iter().next().unwrap();
                 let g = match t {
@@ -90,12 +90,12 @@ pub(crate) fn read_and_process_attributes(
                         g
                     }
                     _ => {
-                        return Err(PathAttrParseError::CfgAttrNotRoundGroup);
+                        return Err(AttrParseError::CfgAttrNotRoundGroup);
                     }
                 };
                 let inner = Vec::<TokenTree>::from_iter(g.stream());
                 if inner.len() < 3 {
-                    return Err(PathAttrParseError::CfgAttrNotTwoParams);
+                    return Err(AttrParseError::CfgAttrNotTwoParams);
                 }
                 let mut ts_before_comma = TokenStream::new();
                 let mut ts_after_comma = Vec::<TokenTree>::new();
@@ -104,7 +104,7 @@ pub(crate) fn read_and_process_attributes(
                     match t {
                         TokenTree::Punct(p) if p.as_char() == ',' => {
                             if comma_encountered {
-                                return Err(PathAttrParseError::CfgAttrNotTwoParams);
+                                return Err(AttrParseError::CfgAttrNotTwoParams);
                             }
                             comma_encountered = true;
                         }
@@ -118,7 +118,7 @@ pub(crate) fn read_and_process_attributes(
                     }
                 }
                 if !comma_encountered {
-                    return Err(PathAttrParseError::CfgAttrNotTwoParams);
+                    return Err(AttrParseError::CfgAttrNotTwoParams);
                 }
 
                 let mut pathy = false;

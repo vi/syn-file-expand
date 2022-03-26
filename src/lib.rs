@@ -1,3 +1,7 @@
+#![doc = include_str!("../README.md")]
+#![forbid(unsafe_code)]
+#![deny(missing_docs)]
+
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -6,10 +10,15 @@ pub extern crate syn;
 
 use im_rc::Vector;
 
+/// Generic error type to report from callbacks
 pub type UserError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
+/// Error originated from parsing of `#[path]`, `#[cfg]` or `#[cfg_attr]` attibutes
+/// in code contained in this crate.
+/// See `Display` implementation for details about specific variants.
+#[allow(missing_docs)]
 #[derive(Error, Debug)]
-pub enum PathAttrParseError {
+pub enum AttrParseError {
     #[error("#[path] attribute has not exactly two tokens: equal sign and a path")]
     NotExactlyTwoTokens,
     #[error("#[path] attribute's first token is not an equal sign punctuation")]
@@ -24,6 +33,8 @@ pub enum PathAttrParseError {
     MalformedCfg,
 }
 
+/// Main error type that is returned from functions of this crate, as well as from some user callbacks.
+#[allow(missing_docs)]
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Cannot open file {path}: {e}")]
@@ -35,7 +46,7 @@ pub enum Error {
     #[error("error parsing path or cfg_attr path attribute in {module}: {e}", module=PathForDisplay(module))]
     PathAttrParseError {
         module: syn::Path,
-        e: PathAttrParseError,
+        e: AttrParseError,
     },
     #[error("parsing error: {e} in {module}", module=PathForDisplay(module))]
     SynParseError {
@@ -53,23 +64,21 @@ impl<'a> std::fmt::Display for PathForDisplay<'a> {
     }
 }
 
-/// Data and configuration source for the progress of expansion.
+/// Data and configuration source for the [`expand_modules_into_inline_modules`] function.
+/// You can use [`ResolverHelper`] instead of manually implementing this.
 pub trait Resolver {
-    /// Called by `expand_modules_into_inline_modules` each time a non-inline module is encountered.
+    /// Called each time a non-inline module is encountered that needs to be expanded.
     /// `module_name` is full path from the specified file root to the module being expanded,
-    /// separated by `::`, including the module name of the file being expanded.
+    /// to use for error messages.
     ///
     /// `relative_path` is pathname of a file the module should be expanded from,
-    /// relative to root module you are expanding.
+    /// relative to root module you are expanding. You will probably need to join this path
+    /// to the path of `src` directory to open the actual file.
     ///
-    /// `relative_path_mod` is alternative location of the file, for `mod.rs` variant.
-    ///
-    /// `cfg` is x from `#[cfg_attr(x, path=...)]` or None if path is not overridden or unconditionally overridden.
-    ///
-    /// This callback may be called multiple times if there are multiple `#[path]` or `#[cfg_attr(...,path)]` attributes.
+    /// This callback may be called multiple times (e.g. for `mymodule.rs` and `mymodule/mod.rs`).
     /// It is error to return more than one Ok(Some) for one module.
     ///
-    /// Retuning Ok(None) for all potential files leaves the module unexpanded in `expand_modules_into_inline_modules` output.
+    /// Retuning Ok(None) for all candidate files leaves the module unexpanded in [`expand_modules_into_inline_modules`]'s output.
     fn resolve(
         &mut self,
         module_name: syn::Path,
@@ -108,6 +117,40 @@ where
 /// but with `mod something;` expanded into `mod something { ... }`.
 ///
 /// It is low-level IO-agnostic function: your callback is responsible for reading and parsing the data.
+/// 
+/// Use [`read_full_crate_source_code`] for easy way to just load crate source code.
+/// 
+/// Example:
+/// 
+/// ```
+/// # fn main() -> Result<(), syn_file_expand::Error> { 
+/// let mut ast: syn::File = syn::parse2(quote::quote! {
+///     mod inner_module;
+/// }).unwrap();
+/// let cfg_evaluator = |_cfg: syn::Meta|Ok(false);
+/// let code_loader = |_module:syn::Path, path:std::path::PathBuf|{
+///    if path == std::path::Path::new("inner_module/mod.rs") {
+///        Ok(Some(syn::parse2(quote::quote! {
+///            trait Foo {
+///            }
+///        }).unwrap()))
+///    } else {
+///        Ok(None)
+///    }
+/// };
+/// let mut resolver = syn_file_expand::ResolverHelper(code_loader, cfg_evaluator);
+/// syn_file_expand::expand_modules_into_inline_modules(&mut ast, &mut resolver)?;
+/// 
+/// let expanded: syn::File = syn::parse2(quote::quote! {
+///     mod inner_module {
+///         trait Foo { }
+///     }
+/// }).unwrap();
+/// 
+/// assert_eq!(ast, expanded);
+/// #   Ok(())
+/// # }
+/// ```
 pub fn expand_modules_into_inline_modules<R: Resolver>(
     content: &mut syn::File,
     resolver: &mut R,
@@ -127,12 +170,30 @@ pub fn expand_modules_into_inline_modules<R: Resolver>(
 ///
 /// If `#[cfg_attr(some_meta,path=...)]` is encountered while reading modules, your callback
 /// predicate `cfg_attr_path_handler` is called with `some_meta` and should decide whether to
-/// follow this cfg_attr or not
+/// follow this cfg_attr or not.
 ///
 /// Just specify `|_|Ok(false)` there if you are confused.
 ///
-/// Security: Note that content of file being loaded may point to arbitrary file, including using absolute paths.
-/// Use IO-less `expand_modules_into_inline_modules` function if you want to control what is allowed to be read.
+/// **Security**: Note that content of file being loaded may point to arbitrary file, including using absolute paths.
+/// Use IO-less [`expand_modules_into_inline_modules`] function if you want to control what is allowed to be read.
+/// 
+/// Example:
+/// 
+/// ```
+/// # fn main() -> Result<(), syn_file_expand::Error> {
+/// let mut input_file = std::path::PathBuf::new();
+/// # input_file.push(env!("CARGO_MANIFEST_DIR"));
+/// input_file.push("src"); 
+/// input_file.push("lib.rs"); 
+/// let ast : syn::File = syn_file_expand::read_full_crate_source_code(input_file, |_|Ok(false))?;
+/// assert!(ast.items.iter()
+///    .filter_map(|x|match x { syn::Item::Fn(y) => Some(y), _ => None})
+///    .map(|x|x.sig.ident.to_string())
+///    .find(|x|x == "read_full_crate_source_code") != None
+/// );
+/// #   Ok(())
+/// # }
+/// ```
 pub fn read_full_crate_source_code(
     path: impl AsRef<std::path::Path>,
     cfg_attr_path_handler: impl FnMut(syn::Meta) -> Result<bool, UserError>,
