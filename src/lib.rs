@@ -180,6 +180,7 @@ pub fn expand_modules_into_inline_modules<R: Resolver>(
 ///
 /// **Security**: Note that content of file being loaded may point to arbitrary file, including using absolute paths.
 /// Use IO-less [`expand_modules_into_inline_modules`] function if you want to control what is allowed to be read.
+/// Also `#[path]` of a module may point to the same file, leading to endless recursion, exausting memory and/or stack.
 ///
 /// Example:
 ///
