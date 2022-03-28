@@ -46,6 +46,10 @@ struct Opts {
     /// Note that the format is different from the one used by `SYN_FILE_EXPAND_DEBUGVARS=1` environment variable.
     #[options(short = 'd')]
     debug_cfg: bool,
+
+    /// Use given file for output instead of stdout
+    #[options(short = 'o')]
+    output: Option<PathBuf>,
 }
 
 mod getcfgname;
@@ -96,5 +100,21 @@ fn main() {
     if opts.undoc {
         undoc::undoc(&mut source);
     }
-    println!("{}", source.into_token_stream());
+    if let Some(output) = opts.output {
+        match (|| -> std::io::Result<()> {
+            use std::io::Write;
+            let f = std::fs::File::create(output)?;
+            let mut f = std::io::BufWriter::with_capacity(128*1024, f);
+            writeln!(f, "{}", source.into_token_stream())?;
+            Ok(())
+        })() {
+            Ok(()) => (),
+            Err(e) => {
+                eprintln!("Output failed: {}", e);
+                std::process::exit(3)
+            }
+        }
+    } else {
+        println!("{}", source.into_token_stream());
+    }
 }

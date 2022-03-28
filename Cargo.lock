@@ -141,7 +141,7 @@ dependencies = [
 
 [[package]]
 name = "syn-file-expand-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "gumdrop",
  "proc-macro2",

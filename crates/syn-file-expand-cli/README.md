@@ -1,20 +1,7 @@
-# syn-file-expand
-
-This library allows you to load full source code of multi-file crates into a single [`syn::File`](https://docs.rs/syn/latest/syn/struct.File.html).
-
-Features:
-
-* Based on `syn` crate.
-* Handling `#[path]` attributes
-* Handling `#[cfg]` where it affects modules to filesystem mapping
-* There is both a lower-level IO-less function and a simpler to use function.
-
-Start exploring the library from the [`read_full_crate_source_code`] function.
-
-# Bonus: CLI tool 
+# syn-file-expand-cli
 
 `syn-file-expand-cli` tool expands Rust sources, like `cargo expand`, but without macro expansion, only for modules.
-`rustc` is not involved. Filtering through `rustfmt` is adviced for debugging use case. 
+`rustc` is not involved.  Filtering through `rustfmt` is adviced for debugging use case. 
 
 ```text
 $ syn-file-expand-cli src/lib.rs | rustfmt
@@ -53,5 +40,5 @@ Optional arguments:
   -o, --output OUTPUT        Use given file for output instead of stdout
 ```
 
-There is [a Github release](https://github.com/vi/syn-file-expand/releases/) with the tool pre-built for various platforms.  
+There are [Github releases](https://github.com/vi/syn-file-expand/releases/) with the tool pre-built for various platforms.  
 You can also install the tool using `cargo install syn-file-expand-cli`.
