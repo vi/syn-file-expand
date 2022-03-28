@@ -1,4 +1,4 @@
-use std::{collections::HashSet, ffi::OsString, path::PathBuf};
+use std::{collections::HashSet, path::PathBuf};
 
 use quote::ToTokens;
 
@@ -93,7 +93,7 @@ fn get_cli_name(input: proc_macro2::TokenStream) -> String {
     for t in input {
         let to_insert: String = match t {
             proc_macro2::TokenTree::Group(g) => {
-                let ret = get_env_name(g.stream());
+                let ret = get_cli_name(g.stream());
                 match g.delimiter() {
                     proc_macro2::Delimiter::Parenthesis => format!("({})", ret),
                     proc_macro2::Delimiter::Brace => format!("{{{}}}", ret),
@@ -124,11 +124,12 @@ fn get_cli_name(input: proc_macro2::TokenStream) -> String {
             }
             proc_macro2::TokenTree::Punct(p) => format!("{}", p.as_char()),
         };
+        buf += &to_insert;
     }
     buf
 }
 
-fn main() -> Result<(), syn_file_expand::Error> {
+fn main() {
     let opts: Opts = gumdrop::parse_args_or_exit(gumdrop::ParsingStyle::AllOptions);
 
     let set_cfg = HashSet::<String>::from_iter(opts.cfg.into_iter());
@@ -136,7 +137,7 @@ fn main() -> Result<(), syn_file_expand::Error> {
 
     let debug_env = std::env::var("SYN_FILE_EXPAND_DEBUGVARS") == Ok("1".to_owned());
     let default = std::env::var("SYN_FILE_EXPAND_DEFAULTTRUE") == Ok("1".to_owned());
-    let source = syn_file_expand::read_full_crate_source_code(&opts.input_file, |cfg| {
+    let source = match syn_file_expand::read_full_crate_source_code(&opts.input_file, |cfg| {
         let envname = format!(
             "SYN_FILE_EXPAND_{}",
             get_env_name(cfg.clone().to_token_stream())
@@ -159,7 +160,12 @@ fn main() -> Result<(), syn_file_expand::Error> {
         } else {
             default
         })
-    })?;
+    }) {
+        Ok(x) => x,
+        Err(e) => {
+            eprintln!("{}", e);
+            std::process::exit(2)
+        }
+    };
     println!("{}", source.into_token_stream());
-    Ok(())
 }
