@@ -20,3 +20,6 @@ thiserror = "1.0.30"
 [dev-dependencies]
 quote = "1.0.15"
 syn = { version = "1.0.88", features = ["printing"]}
+
+[workspace]
+members = [".", "crates/*"]
