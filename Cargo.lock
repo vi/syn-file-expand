@@ -71,9 +71,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.15"
+version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "864d3e96a899863136fc6e99f3d7cae289dafe43bf2c5ac19b70df7210c0a145"
+checksum = "632d02bff7f874a36f33ea8bb416cd484b90cc66c1194b1a1110d067a7013f58"
 dependencies = [
  "proc-macro2",
 ]
@@ -105,9 +105,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "1.0.88"
+version = "1.0.90"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebd69e719f31e88618baa1eaa6ee2de5c9a1c004f1e9ecdb58e8352a13f20a01"
+checksum = "704df27628939572cd88d33f171cd6f896f4eaca85252c6e0a72d8d8287ee86f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -116,13 +116,12 @@ dependencies = [
 
 [[package]]
 name = "syn-file-expand"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e1303f1b482c0ebf1593a9cec5ea53522cbf509d220b69dc4fcc922293a8d49"
+version = "0.1.1"
 dependencies = [
  "im-rc",
  "itertools",
  "proc-macro2",
+ "quote",
  "syn",
  "thiserror",
 ]
@@ -130,24 +129,25 @@ dependencies = [
 [[package]]
 name = "syn-file-expand"
 version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bcf0498cadc601521d8125a201aa487616aa668cb8adefb936c7aa0dce8ba84f"
 dependencies = [
  "im-rc",
  "itertools",
  "proc-macro2",
- "quote",
  "syn",
  "thiserror",
 ]
 
 [[package]]
 name = "syn-file-expand-cli"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "gumdrop",
  "proc-macro2",
  "quote",
  "syn",
- "syn-file-expand 0.1.0",
+ "syn-file-expand 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]

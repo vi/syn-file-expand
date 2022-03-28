@@ -32,11 +32,17 @@ Positional arguments:
 Optional arguments:
   -h, --help
   -l, --loopify              Convert all blocks and expressions to `loop{}`s.
-  -D, --undoc                Stip all documentation attributes.
-  -T, --cfg-true-by-default  Assume all `#[cfg]`s and `#[cfg_attr]`s are true.
+                      Note that inner items within blocks get lost in the process.
+  -D, --undoc                Stip all documentation attributes. Note that inner items within blocks are not processed and may retain their attributes.
+  -T, --cfg-true-by-default  Assume all `#[cfg]`s and `#[cfg_attr]`s are true. May lead to errors
   -c, --cfg CFG              Set this cfg check result to true.
+                                Note that `all` or `any` are not handled.
+                                You need to set all needed expression results one by one.
+                                Note that much less processing happens
+                                to make prepare cfg expression for CLI usage compare to environment variable usage.
   -u, --unset-cfg UNSET-CFG  In `--cfg-true-by-default` mode, explicitly unset given cfg expression outcome.
-  -d, --debug-cfg            Print each encountered cfg check to stderr, in form suitable for `--cfg` parameter.
+  -d, --debug-cfg            Print each encountered cfg check to stderr, in form suitable for `--cfg` parameter
+                   Note that the format is different from the one used by `SYN_FILE_EXPAND_DEBUGVARS=1` environment variable.
   -o, --output OUTPUT        Use given file for output instead of stdout
 ```
 
