@@ -15,9 +15,15 @@ struct Opts {
     #[options(free, required)]
     input_file: PathBuf,
 
-    /// Convert all function bodies to `loop{}`s.
+    /// Convert all blocks and expressions to `loop{}`s.
+    /// Note that inner items within blocks get lost in the process.
     #[options(short = 'l')]
     loopify: bool,
+
+    /// Stip all documentation attributes.
+    /// Note that inner items within blocks are not processed and may retain their attributes.
+    #[options(short = 'D')]
+    undoc: bool,
 
     /// Assume all `#[cfg]`s and `#[cfg_attr]`s are true.
     /// May lead to errors
@@ -42,92 +48,9 @@ struct Opts {
     debug_cfg: bool,
 }
 
-fn get_env_name(input: proc_macro2::TokenStream) -> String {
-    let mut buf = String::new();
-    let mut need_underscore = false;
-    for t in input {
-        let to_insert: String = match t {
-            proc_macro2::TokenTree::Group(g) => {
-                let ret = get_env_name(g.stream());
-                ret
-            }
-            proc_macro2::TokenTree::Ident(x) => {
-                let x = x.to_string().to_ascii_uppercase();
-                x
-            }
-            proc_macro2::TokenTree::Literal(x) => {
-                if let Ok(l) = syn::parse2::<syn::Lit>(x.clone().into_token_stream()) {
-                    match l {
-                        syn::Lit::Str(x) => x
-                            .value()
-                            .to_ascii_uppercase()
-                            .replace(" ", "_")
-                            .replace("-", "_"),
-                        syn::Lit::ByteStr(_) => "".to_owned(),
-                        syn::Lit::Byte(_) => "".to_owned(),
-                        syn::Lit::Char(x) => format!("{}", x.value()),
-                        syn::Lit::Int(x) => x.to_string(),
-                        syn::Lit::Float(_) => "".to_owned(),
-                        syn::Lit::Bool(x) => format!("{}", x.value),
-                        syn::Lit::Verbatim(_) => "".to_owned(),
-                    }
-                } else {
-                    eprintln!("Failed to parse a literal in a cfg `{}`", x);
-                    "".to_owned()
-                }
-            }
-            proc_macro2::TokenTree::Punct(_) => "".to_owned(),
-        };
-        if !to_insert.is_empty() {
-            if need_underscore {
-                buf += "_";
-            }
-            buf += &to_insert;
-            need_underscore = true;
-        }
-    }
-    buf
-}
-fn get_cli_name(input: proc_macro2::TokenStream) -> String {
-    let mut buf = String::new();
-    for t in input {
-        let to_insert: String = match t {
-            proc_macro2::TokenTree::Group(g) => {
-                let ret = get_cli_name(g.stream());
-                match g.delimiter() {
-                    proc_macro2::Delimiter::Parenthesis => format!("({})", ret),
-                    proc_macro2::Delimiter::Brace => format!("{{{}}}", ret),
-                    proc_macro2::Delimiter::Bracket => format!("[{}]", ret),
-                    proc_macro2::Delimiter::None => format!("{}", ret),
-                }
-            }
-            proc_macro2::TokenTree::Ident(x) => {
-                let x = x.to_string();
-                x
-            }
-            proc_macro2::TokenTree::Literal(x) => {
-                if let Ok(l) = syn::parse2::<syn::Lit>(x.clone().into_token_stream()) {
-                    match l {
-                        syn::Lit::Str(x) => x.value(),
-                        syn::Lit::ByteStr(_) => "".to_owned(),
-                        syn::Lit::Byte(_) => "".to_owned(),
-                        syn::Lit::Char(x) => format!("{}", x.value()),
-                        syn::Lit::Int(x) => x.to_string(),
-                        syn::Lit::Float(_) => "".to_owned(),
-                        syn::Lit::Bool(x) => format!("{}", x.value),
-                        syn::Lit::Verbatim(_) => "".to_owned(),
-                    }
-                } else {
-                    eprintln!("Failed to parse a literal in a cfg `{}`", x);
-                    "".to_owned()
-                }
-            }
-            proc_macro2::TokenTree::Punct(p) => format!("{}", p.as_char()),
-        };
-        buf += &to_insert;
-    }
-    buf
-}
+mod getcfgname;
+mod loopify;
+mod undoc;
 
 fn main() {
     let opts: Opts = gumdrop::parse_args_or_exit(gumdrop::ParsingStyle::AllOptions);
@@ -137,12 +60,12 @@ fn main() {
 
     let debug_env = std::env::var("SYN_FILE_EXPAND_DEBUGVARS") == Ok("1".to_owned());
     let default = std::env::var("SYN_FILE_EXPAND_DEFAULTTRUE") == Ok("1".to_owned());
-    let source = match syn_file_expand::read_full_crate_source_code(&opts.input_file, |cfg| {
+    let mut source = match syn_file_expand::read_full_crate_source_code(&opts.input_file, |cfg| {
         let envname = format!(
             "SYN_FILE_EXPAND_{}",
-            get_env_name(cfg.clone().to_token_stream())
+            getcfgname::get_env_name(cfg.clone().to_token_stream())
         );
-        let cliname = get_cli_name(cfg.to_token_stream());
+        let cliname = getcfgname::get_cli_name(cfg.to_token_stream());
         if debug_env {
             eprintln!("{}", envname);
         }
@@ -167,5 +90,11 @@ fn main() {
             std::process::exit(2)
         }
     };
+    if opts.loopify {
+        loopify::loopify(&mut source);
+    }
+    if opts.undoc {
+        undoc::undoc(&mut source);
+    }
     println!("{}", source.into_token_stream());
 }
