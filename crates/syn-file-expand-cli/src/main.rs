@@ -15,26 +15,24 @@ struct Opts {
     #[options(free, required)]
     input_file: PathBuf,
 
-    /// Convert all blocks and expressions to `loop{}`s.
-    /// Note that inner items within blocks get lost in the process.
+    /** Convert all blocks and expressions to `loop{}`s.
+                      Note that inner items within blocks get lost in the process.*/
     #[options(short = 'l')]
     loopify: bool,
 
-    /// Stip all documentation attributes.
-    /// Note that inner items within blocks are not processed and may retain their attributes.
+    /// Stip all documentation attributes. Note that inner items within blocks are not processed and may retain their attributes.
     #[options(short = 'D')]
     undoc: bool,
 
-    /// Assume all `#[cfg]`s and `#[cfg_attr]`s are true.
-    /// May lead to errors
+    /// Assume all `#[cfg]`s and `#[cfg_attr]`s are true. May lead to errors
     #[options(short = 'T')]
     cfg_true_by_default: bool,
 
-    /// Set this cfg check result to true.
-    /// Note that `all` or `any` are not handled.
-    /// You need to set all needed expression results one by one.
-    /// Note that much less processing happens
-    /// to make prepare cfg expression for CLI usage compare to environment variable usage.
+    /** Set this cfg check result to true.
+                                Note that `all` or `any` are not handled.
+                                You need to set all needed expression results one by one.
+                                Note that much less processing happens
+                                to make prepare cfg expression for CLI usage compare to environment variable usage. */
     #[options(short = 'c')]
     cfg: Vec<String>,
 
@@ -42,8 +40,8 @@ struct Opts {
     #[options(short = 'u')]
     unset_cfg: Vec<String>,
 
-    /// Print each encountered cfg check to stderr, in form suitable for `--cfg` parameter.
-    /// Note that the format is different from the one used by `SYN_FILE_EXPAND_DEBUGVARS=1` environment variable.
+    /** Print each encountered cfg check to stderr, in form suitable for `--cfg` parameter
+                   Note that the format is different from the one used by `SYN_FILE_EXPAND_DEBUGVARS=1` environment variable.*/
     #[options(short = 'd')]
     debug_cfg: bool,
 
