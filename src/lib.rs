@@ -39,7 +39,7 @@ pub enum AttrParseError {
 pub enum ErrorCase {
     #[error("Cannot open file {path}: {e}")]
     FailedToOpenFile { path: PathBuf, e: std::io::Error },
-    #[error("The module have multiple explicit #[path] directives")]
+    #[error("The module has multiple explicit #[path] directives")]
     MultipleExplicitPathsSpecifiedForOneModule,
     #[error("Both name/mod.rs and name.rs present")]
     BothModRsAndNameRsPresent,
