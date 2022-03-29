@@ -31,8 +31,8 @@ struct Opts {
     /** Set this cfg check result to true.
                                 Note that `all` or `any` are not handled.
                                 You need to set all needed expression results one by one.
-                                Note that much less processing happens
-                                to make prepare cfg expression for CLI usage compare to environment variable usage. */
+                                Strings required for --cfg are not the same as for environment variables-
+                                -based version of this feature.*/
     #[options(short = 'c')]
     cfg: Vec<String>,
 
