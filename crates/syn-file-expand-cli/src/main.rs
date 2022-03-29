@@ -20,7 +20,7 @@ struct Opts {
     #[options(short = 'l')]
     loopify: bool,
 
-    /// Stip all documentation attributes. Note that inner items within blocks are not processed and may retain their attributes.
+    /// Strip all documentation attributes. Note that inner items within blocks are not processed and may retain their attributes.
     #[options(short = 'D')]
     undoc: bool,
 

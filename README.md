@@ -46,7 +46,7 @@ Optional arguments:
   -h, --help
   -l, --loopify              Convert all blocks and expressions to `loop{}`s.
                       Note that inner items within blocks get lost in the process.
-  -D, --undoc                Stip all documentation attributes. Note that inner items within blocks are not processed and may retain their attributes.
+  -D, --undoc                Strip all documentation attributes. Note that inner items within blocks are not processed and may retain their attributes.
   -T, --cfg-true-by-default  Assume all `#[cfg]`s and `#[cfg_attr]`s are true. May lead to errors
   -c, --cfg CFG              Set this cfg check result to true.
                                 Note that `all` or `any` are not handled.
