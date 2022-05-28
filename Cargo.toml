@@ -1,6 +1,6 @@
 [package]
 name = "syn-file-expand"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 readme = "README.md"
 license = "MIT/Apache-2.0"
@@ -14,12 +14,13 @@ include = ["src","Cargo.toml","tests", "examples", "resources", "README.md"]
 im-rc = "15.0.0"
 itertools = "0.10.3"
 proc-macro2 = "1.0.36"
-syn = { version = "1.0.88", features = ["full","extra-traits"] }
+quote = "1.0.15" # almost not needed, just for one tricky case
+syn = { version = "1.0.88", features = ["full","extra-traits","printing"] }
 thiserror = "1.0.30"
 
 [dev-dependencies]
-quote = "1.0.15"
-syn = { version = "1.0.88", features = ["printing"]}
+#pretty_assertions = "1.2.1"
+prettyplease = "0.1.10"
 
 [workspace]
 members = [".", "crates/*"]

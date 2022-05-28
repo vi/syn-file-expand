@@ -80,7 +80,7 @@ pub trait Resolver {
     /// to the path of `src` directory to open the actual file.
     ///
     /// This callback may be called multiple times (e.g. for `mymodule.rs` and `mymodule/mod.rs`).
-    /// It is error to return more than one Ok(Some) for one module.
+    /// It is error to return more than one Ok(Some) for one module, unless `allow_duplicate_modules_and_convert_cfg` is set to true.
     ///
     /// Retuning Ok(None) for all candidate files leaves the module unexpanded in [`expand_modules_into_inline_modules`]'s output.
     fn resolve(
@@ -92,6 +92,12 @@ pub trait Resolver {
     /// When `#[cfg(mymeta)] mod ...;` or `#[cfg_attr(mymeta,path=...)]` is encountered, this function is called
     /// and you should provide answer whether this cfg should be considered true or false.
     fn check_cfg(&mut self, cfg: syn::Meta) -> Result<bool, UserError>;
+
+    /// Include all the modules, possibly duplicating them.
+    /// `#[cfg_attr(...,path)] mod ...;` are converted to `#[cfg(...)] mod .. {}`
+    /// 
+    /// `check_cfg` is still called, but it is not a problem to return `true` unconditionally.
+    fn allow_duplicate_modules_and_convert_cfg(&mut self) -> bool { false }
 }
 
 /// Helper struct to define `Resolver` implementations using closures.
@@ -160,12 +166,14 @@ pub fn expand_modules_into_inline_modules<R: Resolver>(
     resolver: &mut R,
 ) -> Result<(), Error> {
     let dirs = Vector::new();
+    let mutltimodule_mode = resolver.allow_duplicate_modules_and_convert_cfg();
     expand_impl::expand_impl(
         &mut content.items,
         resolver,
         Vector::new(),
         dirs.clone(),
         dirs,
+        mutltimodule_mode,
     )?;
     Ok(())
 }
@@ -263,6 +271,82 @@ pub fn read_full_crate_source_code(
         &mut root_source,
         &mut MyResolver {
             cfg_attr_path_handler,
+            parent_dir,
+        },
+    )?;
+    Ok(root_source)
+}
+
+/// Even easier function to load full crate source code from the filesystem.
+/// 
+/// Duplicates modules in case of multiple variants cause by cfg attributes.
+/// 
+/// See the warnings in [`read_full_crate_source_code`] documentation.
+pub fn read_full_crate_source_code_with_dupes(
+    path: impl AsRef<std::path::Path>,
+) -> Result<syn::File, Error> {
+    let path = path.as_ref();
+    let root_source = std::fs::read_to_string(path).map_err(|e| Error {
+        module: syn::Path {
+            leading_colon: None,
+            segments: syn::punctuated::Punctuated::new(),
+        },
+        inner: ErrorCase::FailedToOpenFile {
+            path: path.to_owned(),
+            e,
+        },
+    })?;
+    let mut root_source: syn::File = syn::parse_file(&root_source).map_err(|e| Error {
+        module: syn::Path {
+            leading_colon: None,
+            segments: syn::punctuated::Punctuated::new(),
+        },
+        inner: ErrorCase::SynParseError(e),
+    })?;
+
+    let parent_dir = path.parent();
+
+    struct MyResolver2<'a> {
+        parent_dir: Option<&'a std::path::Path>,
+    }
+
+    impl<'a> Resolver for MyResolver2<'a> {
+        fn resolve(
+            &mut self,
+            module_name: syn::Path,
+            path_relative_to_crate_root: PathBuf,
+        ) -> Result<Option<syn::File>, Error> {
+            let path = if let Some(parent_dir) = self.parent_dir {
+                parent_dir.join(&path_relative_to_crate_root)
+            } else {
+                path_relative_to_crate_root
+            };
+            let module_source = std::fs::read_to_string(&path).map_err(|e| Error {
+                module: module_name.clone(),
+                inner: ErrorCase::FailedToOpenFile {
+                    path: path.clone(),
+                    e,
+                },
+            })?;
+            let module_source: syn::File = syn::parse_file(&module_source).map_err(|e| Error {
+                module: module_name,
+                inner: ErrorCase::SynParseError(e),
+            })?;
+            Ok(Some(module_source))
+        }
+
+        fn check_cfg(&mut self, _cfg: syn::Meta) -> Result<bool, UserError> {
+            Ok(true)
+        }
+
+        fn allow_duplicate_modules_and_convert_cfg(&mut self) -> bool {
+            true
+        }
+    }
+
+    expand_modules_into_inline_modules(
+        &mut root_source,
+        &mut MyResolver2 {
             parent_dir,
         },
     )?;
