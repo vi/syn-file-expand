@@ -2,7 +2,7 @@ use std::{collections::HashSet, path::PathBuf};
 
 use quote::ToTokens;
 
-/// Use `syn-file-expand-cli -fTp` to read the whole crate without caring about `cfg`s.
+/// Use `syn-file-expand-cli -fTp src/lib.rs` as a starting point.
 /// 
 /// Reads rust source file, including referred modules and expands them into a single source with all modules inline
 /// Apart from respective dedicated command line arguments, conditional paths like
