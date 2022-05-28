@@ -309,7 +309,8 @@ pub fn read_full_crate_source_code_ex(
 /// **Security**: Note that content of file being loaded may point to arbitrary file, including using absolute paths.
 /// Use IO-less [`expand_modules_into_inline_modules`] function if you want to control what is allowed to be read.
 /// Also `#[path]` of a module may point to the same file, leading to endless recursion, exausting memory and/or stack.
-/// /// Example:
+/// 
+/// Example:
 ///
 /// ```
 /// # fn main() -> Result<(), syn_file_expand::Error> {
@@ -332,7 +333,7 @@ pub fn read_crate(
     read_crate_impl(path.as_ref())
 }
 
-/// Non-generic `read_crate` to avoid moving compilation time to root crate
+/// Non-generic `read_crate` to avoid moving compilation time to the root crate
 fn read_crate_impl(
     path: &std::path::Path,
 ) -> Result<syn::File, Error> {
