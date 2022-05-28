@@ -48,6 +48,10 @@ struct Opts {
     /// Use given file for output instead of stdout
     #[options(short = 'o')]
     output: Option<PathBuf>,
+
+    /// Use `prettyplease` to format the output
+    #[options(short = 'p')]
+    pretty: bool,
 }
 
 mod getcfgname;
@@ -103,7 +107,17 @@ fn main() {
             use std::io::Write;
             let f = std::fs::File::create(output)?;
             let mut f = std::io::BufWriter::with_capacity(128*1024, f);
-            writeln!(f, "{}", source.into_token_stream())?;
+            if opts.pretty {
+                #[cfg(feature="prettyplease")]
+                writeln!(f, "{}", prettyplease::unparse(&source))?;
+                #[cfg(not(feature="prettyplease"))]
+                {
+                    eprintln!("--pretty support is not enabled at compile time");
+                    std::process::exit(3);
+                } 
+            } else {
+                writeln!(f, "{}", source.into_token_stream())?;
+            }
             Ok(())
         })() {
             Ok(()) => (),
@@ -113,6 +127,16 @@ fn main() {
             }
         }
     } else {
-        println!("{}", source.into_token_stream());
+        if opts.pretty {
+            #[cfg(feature="prettyplease")]
+            println!("{}", prettyplease::unparse(&source));
+            #[cfg(not(feature="prettyplease"))]
+            {
+                eprintln!("--pretty support is not enabled at compile time");
+                std::process::exit(3);
+            } 
+        } else {
+            println!("{}", source.into_token_stream());
+        }
     }
 }

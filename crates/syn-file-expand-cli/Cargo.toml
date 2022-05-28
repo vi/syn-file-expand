@@ -19,3 +19,7 @@ quote = "1.0.15"
 syn = { version = "1.0.88", features = ["full"] }
 proc-macro2 = "1.0.36"
 gumdrop = "0.8.1"
+prettyplease = { version = "0.1.10", optional = true }
+
+[features]
+default = ["prettyplease"]
