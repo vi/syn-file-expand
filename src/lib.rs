@@ -221,9 +221,9 @@ pub fn read_full_crate_source_code(
 /// * `allow_duplicate_modules_and_convert_cfgs`
 ///     - if `false`, act the same as [`read_full_crate_source_code`].
 ///     - if `true`, allow loading of duplicate modules (e.g. for different platforms) and preserve
-///                their cfg gates. You may want to omit `cfg_attr_path_handler`
-///                and just use `load_crate_easy_mode` instead.
-/// 
+///                their cfg gates. In this mode, the most logical way to specify `cfg_attr_path_handler` is
+///                just constant `|_|Ok(true)`. This is equivalent to just using [`read_crate`] instead.
+///
 ///  See other info and warnings in [`read_full_crate_source_code`] documentation.
 pub fn read_full_crate_source_code_ex(
     path: impl AsRef<std::path::Path>,
