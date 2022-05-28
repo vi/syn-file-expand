@@ -210,6 +210,18 @@ pub(crate) fn expand_impl<R: Resolver>(
                     dirs_attr = dirs_nat.clone();
                     Some(x)
                 }
+                (Err(ref e1), Err(ref e2))
+                    if multimodule_mode
+                        && matches!(
+                            (&e1.inner, &e2.inner),
+                            (
+                                ErrorCase::FailedToOpenFile { .. },
+                                ErrorCase::FailedToOpenFile { .. }
+                            )
+                        ) =>
+                {
+                    None
+                }
                 (Err(e), _) => return Err(e),
                 (_, Err(e)) => return Err(e),
             };
@@ -218,11 +230,17 @@ pub(crate) fn expand_impl<R: Resolver>(
                 Some(syn::Meta::List(MetaList {
                     path: simple_path(some_span, "not"),
                     paren_token: syn::token::Paren { span: some_span },
-                    nested: Punctuated::from_iter([syn::NestedMeta::Meta(syn::Meta::List(MetaList {
-                        path: simple_path(some_span, "any"),
-                        paren_token: syn::token::Paren { span: some_span },
-                        nested: Punctuated::from_iter(accumulated_cfgs.iter().map(|x|syn::NestedMeta::Meta(x.clone()))),
-                    }))]),
+                    nested: Punctuated::from_iter([syn::NestedMeta::Meta(syn::Meta::List(
+                        MetaList {
+                            path: simple_path(some_span, "any"),
+                            paren_token: syn::token::Paren { span: some_span },
+                            nested: Punctuated::from_iter(
+                                accumulated_cfgs
+                                    .iter()
+                                    .map(|x| syn::NestedMeta::Meta(x.clone())),
+                            ),
+                        },
+                    ))]),
                 }))
             } else {
                 None
