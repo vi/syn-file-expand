@@ -178,7 +178,8 @@ pub fn expand_modules_into_inline_modules<R: Resolver>(
     Ok(())
 }
 
-/// Easy function to load full crate source code from the filesystem.
+/// High-level function to load full crate source code from the filesystem. Use it instead of [`read_crate`]
+/// if you want to process `cfg` attributes and read only code relevant to specific feature or platform configuration.
 ///
 /// If `#[cfg_attr(some_meta,path=...)]` is encountered while reading modules, your callback
 /// predicate `cfg_attr_path_handler` is called with `some_meta` and should decide whether to
@@ -211,6 +212,24 @@ pub fn read_full_crate_source_code(
     path: impl AsRef<std::path::Path>,
     cfg_attr_path_handler: impl FnMut(syn::Meta) -> Result<bool, UserError>,
 ) -> Result<syn::File, Error> {
+    read_full_crate_source_code_ex(path, cfg_attr_path_handler, false)
+}
+
+
+/// The same as [`read_full_crate_source_code`], but with additional argument:
+/// 
+/// * `allow_duplicate_modules_and_convert_cfgs`
+///     - if `false`, act the same as [`read_full_crate_source_code`].
+///     - if `true`, allow loading of duplicate modules (e.g. for different platforms) and preserve
+///                their cfg gates. You may want to omit `cfg_attr_path_handler`
+///                and just use `load_crate_easy_mode` instead.
+/// 
+///  See other info and warnings in [`read_full_crate_source_code`] documentation.
+pub fn read_full_crate_source_code_ex(
+    path: impl AsRef<std::path::Path>,
+    cfg_attr_path_handler: impl FnMut(syn::Meta) -> Result<bool, UserError>,
+    allow_duplicate_modules_and_convert_cfgs: bool,
+) -> Result<syn::File, Error> {
     let path = path.as_ref();
     let root_source = std::fs::read_to_string(path).map_err(|e| Error {
         module: syn::Path {
@@ -235,6 +254,7 @@ pub fn read_full_crate_source_code(
     struct MyResolver<'a, F: FnMut(syn::Meta) -> Result<bool, UserError>> {
         cfg_attr_path_handler: F,
         parent_dir: Option<&'a std::path::Path>,
+        allow_duplicate_modules_and_convert_cfgs: bool,
     }
 
     impl<'a, F: FnMut(syn::Meta) -> Result<bool, UserError>> Resolver for MyResolver<'a, F> {
@@ -265,6 +285,10 @@ pub fn read_full_crate_source_code(
         fn check_cfg(&mut self, cfg: syn::Meta) -> Result<bool, UserError> {
             (self.cfg_attr_path_handler)(cfg)
         }
+
+        fn allow_duplicate_modules_and_convert_cfg(&mut self) -> bool {
+            self.allow_duplicate_modules_and_convert_cfgs
+        }
     }
 
     expand_modules_into_inline_modules(
@@ -272,86 +296,49 @@ pub fn read_full_crate_source_code(
         &mut MyResolver {
             cfg_attr_path_handler,
             parent_dir,
+            allow_duplicate_modules_and_convert_cfgs,
         },
     )?;
     Ok(root_source)
 }
 
-/// Even easier function to load full crate source code from the filesystem.
+/// Load whole source code of a crate based on root `lib.rs` or `main.rs`.
 /// 
-/// Duplicates modules in case of multiple variants cause by cfg attributes.
+/// Use [`read_full_crate_source_code`] function if you want to only load modules relevant to specific cfg settings (features and target settings).
 /// 
-/// See the warnings in [`read_full_crate_source_code`] documentation.
-pub fn read_full_crate_source_code_with_dupes(
+/// **Security**: Note that content of file being loaded may point to arbitrary file, including using absolute paths.
+/// Use IO-less [`expand_modules_into_inline_modules`] function if you want to control what is allowed to be read.
+/// Also `#[path]` of a module may point to the same file, leading to endless recursion, exausting memory and/or stack.
+/// /// Example:
+///
+/// ```
+/// # fn main() -> Result<(), syn_file_expand::Error> {
+/// let mut input_file = std::path::PathBuf::new();
+/// # input_file.push(env!("CARGO_MANIFEST_DIR"));
+/// input_file.push("src");
+/// input_file.push("lib.rs");
+/// let ast : syn::File = syn_file_expand::read_crate(input_file)?;
+/// assert!(ast.items.iter()
+///    .filter_map(|x|match x { syn::Item::Fn(y) => Some(y), _ => None})
+///    .map(|x|x.sig.ident.to_string())
+///    .find(|x|x == "read_crate") != None
+/// );
+/// #   Ok(())
+/// # }
+/// ```
+pub fn read_crate(
     path: impl AsRef<std::path::Path>,
 ) -> Result<syn::File, Error> {
-    let path = path.as_ref();
-    let root_source = std::fs::read_to_string(path).map_err(|e| Error {
-        module: syn::Path {
-            leading_colon: None,
-            segments: syn::punctuated::Punctuated::new(),
-        },
-        inner: ErrorCase::FailedToOpenFile {
-            path: path.to_owned(),
-            e,
-        },
-    })?;
-    let mut root_source: syn::File = syn::parse_file(&root_source).map_err(|e| Error {
-        module: syn::Path {
-            leading_colon: None,
-            segments: syn::punctuated::Punctuated::new(),
-        },
-        inner: ErrorCase::SynParseError(e),
-    })?;
-
-    let parent_dir = path.parent();
-
-    struct MyResolver2<'a> {
-        parent_dir: Option<&'a std::path::Path>,
-    }
-
-    impl<'a> Resolver for MyResolver2<'a> {
-        fn resolve(
-            &mut self,
-            module_name: syn::Path,
-            path_relative_to_crate_root: PathBuf,
-        ) -> Result<Option<syn::File>, Error> {
-            let path = if let Some(parent_dir) = self.parent_dir {
-                parent_dir.join(&path_relative_to_crate_root)
-            } else {
-                path_relative_to_crate_root
-            };
-            let module_source = std::fs::read_to_string(&path).map_err(|e| Error {
-                module: module_name.clone(),
-                inner: ErrorCase::FailedToOpenFile {
-                    path: path.clone(),
-                    e,
-                },
-            })?;
-            let module_source: syn::File = syn::parse_file(&module_source).map_err(|e| Error {
-                module: module_name,
-                inner: ErrorCase::SynParseError(e),
-            })?;
-            Ok(Some(module_source))
-        }
-
-        fn check_cfg(&mut self, _cfg: syn::Meta) -> Result<bool, UserError> {
-            Ok(true)
-        }
-
-        fn allow_duplicate_modules_and_convert_cfg(&mut self) -> bool {
-            true
-        }
-    }
-
-    expand_modules_into_inline_modules(
-        &mut root_source,
-        &mut MyResolver2 {
-            parent_dir,
-        },
-    )?;
-    Ok(root_source)
+    read_crate_impl(path.as_ref())
 }
+
+/// Non-generic `read_crate` to avoid moving compilation time to root crate
+fn read_crate_impl(
+    path: &std::path::Path,
+) -> Result<syn::File, Error> {
+    read_full_crate_source_code_ex(path, |_|Ok(true), true)
+}
+
 
 mod attrs;
 mod expand_impl;

@@ -2,6 +2,8 @@ use std::{collections::HashSet, path::PathBuf};
 
 use quote::ToTokens;
 
+/// Use `syn-file-expand-cli -fTp` to read the whole crate without caring about `cfg`s.
+/// 
 /// Reads rust source file, including referred modules and expands them into a single source with all modules inline
 /// Apart from respective dedicated command line arguments, conditional paths like
 /// `#[cfg_attr(feature="qqq"),path=...)` are resolved using
@@ -24,9 +26,15 @@ struct Opts {
     #[options(short = 'D')]
     undoc: bool,
 
-    /// Assume all `#[cfg]`s and `#[cfg_attr]`s are true. May lead to errors
+    /// Assume all `#[cfg]`s and `#[cfg_attr]`s are true. May lead to errors unless `-f` is also used.
     #[options(short = 'T')]
     cfg_true_by_default: bool,
+
+    /// Allow duplicate modules, also preserve/transform some `cfg` attributes.
+    /// With `-T` it allows to read the full crate source code for all cfg variants.
+    #[options(short = 'f')]
+    full_crate_tree: bool,
+
 
     /** Set this cfg check result to true.
                                 Note that `all` or `any` are not handled.
@@ -66,7 +74,7 @@ fn main() {
 
     let debug_env = std::env::var("SYN_FILE_EXPAND_DEBUGVARS") == Ok("1".to_owned());
     let default = std::env::var("SYN_FILE_EXPAND_DEFAULTTRUE") == Ok("1".to_owned());
-    let mut source = match syn_file_expand::read_full_crate_source_code(&opts.input_file, |cfg| {
+    let mut source = match syn_file_expand::read_full_crate_source_code_ex(&opts.input_file, |cfg| {
         let envname = format!(
             "SYN_FILE_EXPAND_{}",
             getcfgname::get_env_name(cfg.clone().to_token_stream())
@@ -89,7 +97,7 @@ fn main() {
         } else {
             default
         })
-    }) {
+    }, opts.full_crate_tree) {
         Ok(x) => x,
         Err(e) => {
             eprintln!("{}", e);

@@ -24,3 +24,11 @@ prettyplease = "0.1.10"
 
 [workspace]
 members = [".", "crates/*"]
+
+[profile.release]
+opt-level = "s"
+debug = 1
+lto = true
+codegen-units = 1
+incremental = false
+panic = 'abort'

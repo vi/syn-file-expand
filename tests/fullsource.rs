@@ -39,7 +39,7 @@ fn fullsource_withdup() {
     sample.push("withdup"); 
     sample.push("lib.rs"); 
 
-    let src = syn_file_expand::read_full_crate_source_code_with_dupes(sample).unwrap();
+    let src = syn_file_expand::read_crate(sample).unwrap();
 
     let expected : syn::File = syn::parse2(q!{
         mod duplicate_plain {

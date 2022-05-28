@@ -7,7 +7,7 @@ Features:
 * Based on `syn` crate.
 * Handling `#[path]` attributes
 * Handling `#[cfg]` where it affects modules to filesystem mapping
-* There is both a lower-level IO-less function and a simpler to use function.
+* There is both a lower-level IO-less function and a simpler one that just loads crate from a `std::fs::Path`.
 
 Start exploring the library from the [`read_full_crate_source_code`] function.
 

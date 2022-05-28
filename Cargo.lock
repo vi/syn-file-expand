@@ -126,19 +126,6 @@ dependencies = [
 
 [[package]]
 name = "syn-file-expand"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcf0498cadc601521d8125a201aa487616aa668cb8adefb936c7aa0dce8ba84f"
-dependencies = [
- "im-rc",
- "itertools",
- "proc-macro2",
- "syn",
- "thiserror",
-]
-
-[[package]]
-name = "syn-file-expand"
 version = "0.2.0"
 dependencies = [
  "im-rc",
@@ -159,7 +146,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
- "syn-file-expand 0.1.1",
+ "syn-file-expand",
 ]
 
 [[package]]
