@@ -9,6 +9,10 @@ Features:
 * Handling `#[cfg]` where it affects modules to filesystem mapping
 * There is both a lower-level IO-less function and a simpler one that just loads crate from a `std::fs::Path`.
 
+Limitation:
+
+* `cfg_if` [like this](https://github.com/Amanieu/parking_lot/blob/a75875b0bf904287a9749e8eabea919b5e9dd8a9/core/src/thread_parker/mod.rs#L53-L83) is not handled.
+
 Start exploring the library from the [`read_crate`](https://docs.rs/syn-file-expand/latest/syn_file_expand/fn.read_crate.html) function.
 
 # Bonus: CLI tool 
