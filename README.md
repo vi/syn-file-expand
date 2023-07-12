@@ -12,6 +12,7 @@ Features:
 Limitation:
 
 * `cfg_if` [like this](https://github.com/Amanieu/parking_lot/blob/a75875b0bf904287a9749e8eabea919b5e9dd8a9/core/src/thread_parker/mod.rs#L53-L83) is not handled.
+* `include!` / `include_str!` / `include_bytes!` is not handleded.
 
 Start exploring the library from the [`read_crate`](https://docs.rs/syn-file-expand/latest/syn_file_expand/fn.read_crate.html) function.
 
