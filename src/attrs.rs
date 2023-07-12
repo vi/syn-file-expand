@@ -1,137 +1,89 @@
 use proc_macro2;
 use proc_macro2::TokenStream;
+use quote::ToTokens;
+use syn::MacroDelimiter;
+use syn::Meta;
+use syn::MetaList;
+use syn::MetaNameValue;
+use syn::Token;
+use syn::punctuated::Punctuated;
 
-use crate::ErrorCase;
 
 use super::AttrParseError;
 
-use super::Error;
 
 use std::path::PathBuf;
 
-use proc_macro2::TokenTree;
-
-pub(crate) fn extract_path_from_attr(
-    tt: Vec<TokenTree>,
-    mod_syn_path: &syn::Path,
-) -> Result<PathBuf, Error> {
-    let ape = |x|Err(Error {
-        module: mod_syn_path.clone(),
-        inner: ErrorCase::AttrParseError(x),
-    }); 
-    if tt.len() != 2 {
-        return Err(Error {
-            module: mod_syn_path.clone(),
-            inner: ErrorCase::AttrParseError(AttrParseError::NotExactlyTwoTokens),
-        });
-    }
-    match &tt[0] {
-        TokenTree::Punct(x) if x.as_char() == '=' => (),
-        _ => {
-            return ape(AttrParseError::FirstTokenIsNotEqualSign);
-        }
-    }
-    match &tt[1] {
-        TokenTree::Literal(_) => (),
-        _ => {
-            return ape(AttrParseError::SecondTokenIsNotStringLiteral)
-        }
-    }
-    let ts = TokenStream::from(tt[1].clone());
-    let tslit: syn::Lit = syn::parse2(ts).map_err(|e| Error {
-        module: mod_syn_path.clone(),
-        inner: ErrorCase::SynParseError(e),
-    })?;
-    let explicit_path = match tslit {
-        syn::Lit::Str(x) => PathBuf::from(x.value()),
-        _ => {
-            return ape(AttrParseError::SecondTokenIsNotStringLiteral)
-        }
-    };
-    Ok(explicit_path)
-}
 
 pub(crate) fn read_and_process_attributes(
     input_attrs: &[syn::Attribute],
-    path_attrs: &mut Vec<(Vec<TokenTree>, Option<TokenStream>)>,
+    path_attrs: &mut Vec<(PathBuf, Option<TokenStream>)>,
     attrs: &mut Vec<syn::Attribute>,
     cfg_attrs: &mut Vec<TokenStream>,
 ) -> Result<(), AttrParseError> {
     for attr in input_attrs {
-        match &attr.path {
-            x if x.get_ident().map(|x| x.to_string()) == Some("cfg".to_owned()) => {
-                let tt = Vec::<TokenTree>::from_iter(attr.tokens.clone());
-                if tt.len() != 1 {
+        match &attr.meta {
+            Meta::List(MetaList { path, delimiter, tokens }) if path.is_ident("cfg") => {
+                if !matches!(delimiter, MacroDelimiter::Paren(..)) {
                     return Err(AttrParseError::MalformedCfg);
                 }
-                let g = match tt.into_iter().next().unwrap() {
-                    TokenTree::Group(g) if g.delimiter() == proc_macro2::Delimiter::Parenthesis => g,
-                    _ => return Err(AttrParseError::MalformedCfg),
+                cfg_attrs.push(tokens.clone());
+            }
+            Meta::NameValue(MetaNameValue { path, eq_token: _, value }) if path.is_ident("path") => {
+                let path = match value {
+                    syn::Expr::Lit(lit) => match &lit.lit {
+                        syn::Lit::Str(x) => x.value(),
+                        _ => return Err(AttrParseError::SecondTokenIsNotStringLiteral),
+                    }
+                    _ => return Err(AttrParseError::SecondTokenIsNotStringLiteral),
                 };
-                cfg_attrs.push(g.stream());
+                path_attrs.push((PathBuf::from(path), None));
             }
-            x if x.get_ident().map(|x| x.to_string()) == Some("path".to_owned()) => {
-                let tt = Vec::<TokenTree>::from_iter(attr.tokens.clone());
-                path_attrs.push((tt, None));
+            Meta::Path(path) | Meta::List(MetaList { path, .. }) if path.is_ident("path") => {
+                return Err(AttrParseError::FirstTokenIsNotEqualSign);
             }
-            x if x.get_ident().map(|x| x.to_string()) == Some("cfg_attr".to_owned()) => {
-                let tt = Vec::<TokenTree>::from_iter(attr.tokens.clone());
-                if tt.len() != 1 {
+            
+            Meta::Path(path) | Meta::NameValue(MetaNameValue { path, .. }) if path.is_ident("cfg_attr") => {
+                return Err(AttrParseError::CfgAttrNotRoundGroup);
+            }
+
+            Meta::List(MetaList { path, delimiter, .. }) if path.is_ident("cfg_attr") => {
+                if !matches!(delimiter, MacroDelimiter::Paren(..)) {
                     return Err(AttrParseError::CfgAttrNotRoundGroup);
                 }
-                let t = tt.into_iter().next().unwrap();
-                let g = match t {
-                    TokenTree::Group(g)
-                        if g.delimiter() == proc_macro2::Delimiter::Parenthesis =>
-                    {
-                        g
-                    }
-                    _ => {
-                        return Err(AttrParseError::CfgAttrNotRoundGroup);
-                    }
+
+                let Ok(nested) = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated) else {
+                    return Err(AttrParseError::MalformedCfg)
                 };
-                let inner = Vec::<TokenTree>::from_iter(g.stream());
-                if inner.len() < 3 {
-                    return Err(AttrParseError::CfgAttrNotTwoParams);
-                }
-                let mut ts_before_comma = TokenStream::new();
-                let mut ts_after_comma = Vec::<TokenTree>::new();
-                let mut comma_encountered = false;
-                for t in inner.into_iter() {
-                    match t {
-                        TokenTree::Punct(p) if p.as_char() == ',' => {
-                            if comma_encountered {
-                                return Err(AttrParseError::CfgAttrNotTwoParams);
-                            }
-                            comma_encountered = true;
-                        }
-                        x => {
-                            if comma_encountered {
-                                ts_after_comma.push(x)
-                            } else {
-                                ts_before_comma.extend(std::iter::once(x))
-                            }
-                        }
-                    }
-                }
-                if !comma_encountered {
+
+                if nested.len() != 2 {
                     return Err(AttrParseError::CfgAttrNotTwoParams);
                 }
 
-                let mut pathy = false;
-                if !ts_after_comma.is_empty() {
-                    match &ts_after_comma[0] {
-                        TokenTree::Ident(i) if i.to_string() == "path" => pathy = true,
-                        _ => (),
-                    }
-                }
+                let condition = &nested[0];
+                let potential_path = &nested[1];
 
-                if pathy {
-                    path_attrs.push((ts_after_comma[1..].to_vec(), Some(ts_before_comma)));
-                } else {
+                if ! potential_path.path().is_ident("path") {
                     attrs.push(attr.clone());
+                    continue;
                 }
+
+                let path = match potential_path {
+                    Meta::NameValue(MetaNameValue { path: _, eq_token: _, value }) => {
+                        match value {
+                            syn::Expr::Lit(lit) => match &lit.lit {
+                                syn::Lit::Str(x) => x.value(),
+                                _ => return Err(AttrParseError::SecondTokenIsNotStringLiteral),
+                            }
+                            _ => return Err(AttrParseError::SecondTokenIsNotStringLiteral),
+                        }
+                    }
+                    _ => return Err(AttrParseError::FirstTokenIsNotEqualSign),
+                };
+
+                path_attrs.push((PathBuf::from(path), Some(condition.to_token_stream())));
             }
+
             _ => attrs.push(attr.clone()),
         }
     }

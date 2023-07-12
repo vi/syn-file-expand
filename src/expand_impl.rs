@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 
 use im_rc::Vector;
-use proc_macro2::{TokenStream, TokenTree};
-use syn::{punctuated::Punctuated, spanned::Spanned, MetaList};
+use proc_macro2::TokenStream;
+use quote::ToTokens;
+use syn::{punctuated::Punctuated, spanned::Spanned, MetaList, Token};
 
 use crate::{attrs, Error, ErrorCase, Resolver};
 
@@ -65,6 +66,7 @@ pub(crate) fn expand_impl<R: Resolver>(
         module_file_mod.push("mod.rs");
         module_file_nomod.push(&chunk_rs);
 
+        // Used mostly for error reporting
         let mod_syn_path = syn::Path {
             leading_colon: None,
             segments: syn::punctuated::Punctuated::from_iter(inner_stack.iter().map(|x| {
@@ -88,14 +90,15 @@ pub(crate) fn expand_impl<R: Resolver>(
             dirs_attr: Vector<PathBuf>,
             /// Root path to use for recursive expansions for inner modules without `#[path]` ("natural" path)
             dirs_nat: Vector<PathBuf>,
-            cfg: Option<syn::Meta>,
+            /// Special additional `#[cfg]` attribute that is synthesized    and injected into expanded module in multi-module mode
+            injected_cfg: Option<syn::Meta>,
         }
 
         // outer level of Vec: expansion results based on multiple path attributes or `name/mod.rs` vs `name.rs` distinction.
         // inner level of Option: whether the expansion resulted in actual code or failure to open a file
         let mut expansion_candidates: Vec<ExpandedModuleInfo> = Vec::with_capacity(1);
 
-        let mut path_attrs: Vec<(Vec<TokenTree>, Option<TokenStream>)> = Vec::new();
+        let mut path_attrs: Vec<(PathBuf, Option<TokenStream>)> = Vec::new();
         let mut cfg_attrs: Vec<TokenStream> = Vec::new();
         attrs::read_and_process_attributes(
             &item_mod.attrs,
@@ -121,12 +124,10 @@ pub(crate) fn expand_impl<R: Resolver>(
         let mut need_to_try_natural_file_locations = true;
         let mut accumulated_cfgs = Vec::<syn::Meta>::new();
 
-        for (tt, cfg) in path_attrs {
-            if cfg.is_none() && !expansion_candidates.is_empty() && !multimodule_mode {
+        for (explicit_path, condition_in_cfg_attr_path) in path_attrs {
+            if condition_in_cfg_attr_path.is_none() && !expansion_candidates.is_empty() && !multimodule_mode {
                 return Err(err(ErrorCase::MultipleExplicitPathsSpecifiedForOneModule));
             }
-
-            let explicit_path = attrs::extract_path_from_attr(tt, &mod_syn_path)?;
 
             let mut module_file_explicit = PathBuf::with_capacity(len_hint);
 
@@ -140,7 +141,7 @@ pub(crate) fn expand_impl<R: Resolver>(
                 dirs_candidate.push_back(parent.to_owned());
             }
 
-            if let Some(cfg) = cfg {
+            if let Some(cfg) = condition_in_cfg_attr_path {
                 let cfg: syn::Meta =
                     syn::parse2(cfg).map_err(|e| err(ErrorCase::SynParseError(e)))?;
                 if resolver
@@ -158,7 +159,7 @@ pub(crate) fn expand_impl<R: Resolver>(
                         result,
                         dirs_attr: dirs_candidate.clone(),
                         dirs_nat: dirs_candidate,
-                        cfg: Some(cfg.clone()),
+                        injected_cfg: Some(cfg.clone()),
                     });
                     accumulated_cfgs.push(cfg);
                 }
@@ -169,7 +170,7 @@ pub(crate) fn expand_impl<R: Resolver>(
                     result,
                     dirs_attr: dirs_candidate.clone(),
                     dirs_nat: dirs_candidate,
-                    cfg: None,
+                    injected_cfg: None,
                 });
             }
         }
@@ -226,21 +227,26 @@ pub(crate) fn expand_impl<R: Resolver>(
                 (_, Err(e)) => return Err(e),
             };
             let some_span = item_mod.span();
+            let throwaway_group = proc_macro2::Group::new(proc_macro2::Delimiter::Bracket, Default::default());
+            // I'm not sure what to do with spans of newly generated tokens.
+            let some_delim_span = throwaway_group.delim_span();
             let cfg = if multimodule_mode && !accumulated_cfgs.is_empty() {
+                let tokens_inside_any : TokenStream = Punctuated::<_,Token![,]>::from_iter(
+                    accumulated_cfgs
+                        .iter()
+                        .map(|x| x.clone()),
+                ).into_token_stream();
+                let tokens_inside_not : TokenStream = syn::Meta::List(
+                    MetaList {
+                        path: simple_path(some_span, "any"),
+                        delimiter: syn::MacroDelimiter::Paren(syn::token::Paren { span: some_delim_span }),
+                        tokens: tokens_inside_any,
+                    },
+                ).into_token_stream();
                 Some(syn::Meta::List(MetaList {
                     path: simple_path(some_span, "not"),
-                    paren_token: syn::token::Paren { span: some_span },
-                    nested: Punctuated::from_iter([syn::NestedMeta::Meta(syn::Meta::List(
-                        MetaList {
-                            path: simple_path(some_span, "any"),
-                            paren_token: syn::token::Paren { span: some_span },
-                            nested: Punctuated::from_iter(
-                                accumulated_cfgs
-                                    .iter()
-                                    .map(|x| syn::NestedMeta::Meta(x.clone())),
-                            ),
-                        },
-                    ))]),
+                    delimiter: syn::MacroDelimiter::Paren(syn::token::Paren { span: some_delim_span }),
+                    tokens: tokens_inside_not,
                 }))
             } else {
                 None
@@ -249,7 +255,7 @@ pub(crate) fn expand_impl<R: Resolver>(
                 result,
                 dirs_attr,
                 dirs_nat,
-                cfg,
+                injected_cfg: cfg,
             });
         }
 
@@ -262,7 +268,7 @@ pub(crate) fn expand_impl<R: Resolver>(
             result,
             dirs_attr,
             dirs_nat,
-            cfg,
+            injected_cfg: cfg,
         } in expansion_candidates.into_iter()
         {
             if let Some(inner) = result {
@@ -271,6 +277,8 @@ pub(crate) fn expand_impl<R: Resolver>(
                 let mut attrs_copy = attrs.clone();
 
                 let some_span = item_mod.span();
+                let throwaway_group = proc_macro2::Group::new(proc_macro2::Delimiter::Bracket, Default::default());
+                let some_delim_span = throwaway_group.delim_span();
                 if let Some(cfg) = cfg {
                     if multimodule_mode {
                         attrs_copy.push(syn::Attribute {
@@ -278,9 +286,12 @@ pub(crate) fn expand_impl<R: Resolver>(
                             // just plugging whatever matches the signature and what I have found the first.
                             pound_token: syn::token::Pound { spans: [some_span] },
                             style: syn::AttrStyle::Outer,
-                            bracket_token: syn::token::Bracket { span: some_span },
-                            path: simple_path(some_span, "cfg"),
-                            tokens: quote::quote!((#cfg)),
+                            bracket_token: syn::token::Bracket { span: some_delim_span },
+                            meta : syn::Meta::List(syn::MetaList {
+                                path: simple_path(some_span, "cfg"),
+                                delimiter: syn::MacroDelimiter::Paren(syn::token::Paren { span: some_delim_span }),
+                                tokens: cfg.into_token_stream(),
+                            }),
                         })
                     }
                 }
@@ -290,6 +301,9 @@ pub(crate) fn expand_impl<R: Resolver>(
                 }
 
                 //dbg!(&inner_stack, &dirs_nat, &dirs_attr);
+
+                // recursive call to process nested modules
+
                 expand_impl(
                     &mut inner_items,
                     resolver,
@@ -311,6 +325,7 @@ pub(crate) fn expand_impl<R: Resolver>(
                         inner_items,
                     )),
                     semi: None,
+                    unsafety: item_mod.unsafety,
                 };
 
                 if !multimodule_mode {

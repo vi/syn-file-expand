@@ -1,8 +1,8 @@
 
 fn undoc_attrs(attrs: &mut Vec<syn::Attribute>) {
     attrs.retain(|attr| {
-        match attr.path.get_ident().map(|x|x.to_string()).as_deref() {
-            Some("doc") => false,
+        match &attr.meta {
+            syn::Meta::NameValue(x) => !x.path.is_ident("doc"),
             _ => true,
         }
     });
@@ -17,7 +17,7 @@ fn undoc_item(item: &mut syn::Item) {
                     syn::TraitItem::Const(y) => {
                         undoc_attrs(&mut y.attrs)
                     }
-                    syn::TraitItem::Method(y) => {
+                    syn::TraitItem::Fn(y) => {
                         undoc_attrs(&mut y.attrs)
                     }
                     syn::TraitItem::Type(y) => undoc_attrs(&mut y.attrs),
@@ -42,7 +42,7 @@ fn undoc_item(item: &mut syn::Item) {
             for subitem in &mut x.items {
                 match subitem {
                     syn::ImplItem::Const(y) => undoc_attrs(&mut y.attrs),
-                    syn::ImplItem::Method(y) =>undoc_attrs(&mut y.attrs),
+                    syn::ImplItem::Fn(y) =>undoc_attrs(&mut y.attrs),
                     syn::ImplItem::Macro(y)  =>undoc_attrs(&mut y.attrs),
                     syn::ImplItem::Type(y)  =>undoc_attrs(&mut y.attrs),
                     syn::ImplItem::Verbatim(_) => (),

@@ -12,7 +12,7 @@ fn loopify_block(block: &mut syn::Block) {
                 brace_token: syn::token::Brace::default(),
                 stmts: vec![],
             },
-        })));
+        }), None));
 }
 
 fn loopify_expr(expr: &mut syn::Expr) {
@@ -42,7 +42,7 @@ fn loopify_item(item: &mut syn::Item) {
                             loopify_expr(&mut z.1);
                         }
                     }
-                    syn::TraitItem::Method(y) => {
+                    syn::TraitItem::Fn(y) => {
                         if let Some(z) = &mut y.default {
                             loopify_block(z);
                         }
@@ -69,7 +69,7 @@ fn loopify_item(item: &mut syn::Item) {
                     syn::ImplItem::Const(y) => {
                         loopify_expr(&mut y.expr);
                     }
-                    syn::ImplItem::Method(y) => {
+                    syn::ImplItem::Fn(y) => {
                         loopify_block(&mut y.block);
                     }
                     syn::ImplItem::Macro(y) => {

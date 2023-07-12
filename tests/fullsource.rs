@@ -1,5 +1,5 @@
-use quote::{quote as q};
-//use pretty_assertions::{assert_eq};
+use quote::quote as q;
+//use pretty_assertions::assert_eq;
 
 #[test]
 fn fullsource_plain() {

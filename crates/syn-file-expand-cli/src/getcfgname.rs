@@ -28,6 +28,7 @@ pub(crate) fn get_env_name(input: proc_macro2::TokenStream) -> String {
                         syn::Lit::Float(_) => "".to_owned(),
                         syn::Lit::Bool(x) => format!("{}", x.value),
                         syn::Lit::Verbatim(_) => "".to_owned(),
+                        _ => "".to_owned(),
                     }
                 } else {
                     eprintln!("Failed to parse a literal in a cfg `{}`", x);
@@ -75,6 +76,7 @@ pub(crate) fn get_cli_name(input: proc_macro2::TokenStream) -> String {
                         syn::Lit::Float(_) => "".to_owned(),
                         syn::Lit::Bool(x) => format!("{}", x.value),
                         syn::Lit::Verbatim(_) => "".to_owned(),
+                        _ => "".to_owned(),
                     }
                 } else {
                     eprintln!("Failed to parse a literal in a cfg `{}`", x);
